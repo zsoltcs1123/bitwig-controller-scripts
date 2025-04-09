@@ -1,0 +1,11 @@
+{
+    "name": "nanoKontrol2 Drum Machine Group",
+    "vendor": "Korg",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Korg nanoKontrol2 drum machine Group script",
+    "category": "Controller",
+    "hardware_vendor": "Korg",
+    "hardware_model": "nanoKontrol2",
+    "main": "nanoKontrol2DrumMachineGroup.control.js"
+} 
