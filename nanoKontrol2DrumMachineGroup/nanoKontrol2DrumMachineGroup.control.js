@@ -206,11 +206,13 @@ function selectChildTrack(index) {
         // Don't change sliderPage - keep it on group
         drumPadBank = childDrumPadBank;
 
-        // Reset pages
+        // Reset to page 0 (default) when selecting a child track
         currentPage = 0;
         if (remoteControls) remoteControls.selectedPageIndex().set(0);
         
         host.showPopupNotification("Selected Track: " + (currentTrackIndex + 1));
+        
+        // Force update of all LEDs to ensure proper state
         updatePageLeds();
     }
 }
@@ -218,6 +220,7 @@ function selectChildTrack(index) {
 function updatePageLeds() {
     // S buttons (Knob page select)
     for (let i = 0; i < 8; i++) {
+        // For both child and group tracks, light up the corresponding S button based on currentPage
         sendMidi(0xB0, CC.S1 + i, (currentPage === i + 1) ? 127 : 0);
     }
     
@@ -260,6 +263,8 @@ function switchToGroupMode(targetPage) {
     currentPage = targetPage;
     if (remoteControls) remoteControls.selectedPageIndex().set(targetPage);
     host.showPopupNotification("Selected Group Track (Page " + targetPage + ")");
+    
+    // Force update of all LEDs to ensure proper state
     updatePageLeds();
 }
 
@@ -332,13 +337,18 @@ function onMidi(status, data1, data2) {
                 if (data1 === CC.S1 + i) {
                     if (data2 > 0) { // Button pressed
                         host.println(`S${i+1} pressed: Current Knob Page = ${currentPage}`);
+                        // Toggle behavior: if already on this page, go back to page 0
+                        // Otherwise, go to this page
                         if (currentPage === i + 1) {
                             host.println(`S${i+1}: Toggling back to page 0`);
                             remoteControls.selectedPageIndex().set(0);
+                            currentPage = 0;
                         } else {
                             host.println(`S${i+1}: Setting page to ${i + 1}`);
                             remoteControls.selectedPageIndex().set(i + 1);
+                            currentPage = i + 1;
                         }
+                        updatePageLeds();
                     }
                     return;
                 }

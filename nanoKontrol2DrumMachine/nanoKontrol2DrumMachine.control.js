@@ -179,12 +179,17 @@ function init() {
     });
 
     // Observers for R button parameter values (for LED feedback)
-    for (let i = 0; i < 8; i++) {
+    // Only for parameters 0 and 1 (FF and RW buttons)
+    for (let i = 0; i < 2; i++) {
         if (rButtonPage) {
             let parameter = rButtonPage.getParameter(i);
             parameter.value().addValueObserver((value) => {
-                 // Assuming value > 0 means ON for the toggle
-                sendMidi(0xB0, CC.R1 + i, value > 0 ? 127 : 0);
+                // Only update FF and RW LEDs
+                if (i === 0) {
+                    sendMidi(0xB0, CC.REW, value > 0 ? 127 : 0);
+                } else if (i === 1) {
+                    sendMidi(0xB0, CC.FF, value > 0 ? 127 : 0);
+                }
             });
         }
     }
@@ -226,21 +231,20 @@ function updatePageLeds() {
         }
     }
 
-    // R buttons (Page 10 Toggles)
-    if (rButtonPage) {
-        for (let i = 0; i < 8; i++) {
-            let parameter = rButtonPage.getParameter(i);
-            sendMidi(0xB0, CC.R1 + i, parameter.value().get() > 0 ? 127 : 0);
-        }
+    // R buttons (Track Navigation)
+    for (let i = 0; i < 8; i++) {
+        sendMidi(0xB0, CC.R1 + i, (currentTrackIndex === i) ? 127 : 0);
     }
 
     // Transport buttons
     sendMidi(0xB0, CC.PLAY, isPlaying ? 127 : 0);
     sendMidi(0xB0, CC.REC, isRecording ? 127 : 0);
 
-    // Track Navigation buttons (REW/FF)
-    sendMidi(0xB0, CC.REW, currentTrackIndex > 0 ? 127 : 0); 
-    sendMidi(0xB0, CC.FF, currentTrackIndex < TRACK_BANK_SIZE - 1 ? 127 : 0);
+    // FF/RW buttons (R Button Page Parameters 0 and 1)
+    if (rButtonPage) {
+        sendMidi(0xB0, CC.FF, rButtonPage.getParameter(1).value().get() > 0 ? 127 : 0);
+        sendMidi(0xB0, CC.REW, rButtonPage.getParameter(0).value().get() > 0 ? 127 : 0);
+    }
 }
 
 function onMidi(status, data1, data2) {
@@ -257,29 +261,35 @@ function onMidi(status, data1, data2) {
             }
         }
 
-        // --- R Buttons (Dedicated Page 10 Toggles) ---
-        if (rButtonPage) {
-            for (let i = 0; i < 8; i++) {
-                if (data1 === CC.R1 + i) {
-                    if (data2 > 0) { // Button pressed
-                        host.println(`R${i+1}: Target Page Index = ${rButtonPage.selectedPageIndex().get()}`);
-                        let parameter = rButtonPage.getParameter(i);
-                        // Toggle behavior: Set to max (127) if currently 0, otherwise set to 0
-                        parameter.value().set(parameter.value().get() === 0 ? 127 : 0, 128);
-                    }
-                    return; 
+        // --- R Buttons (Track Navigation) ---
+        for (let i = 0; i < 8; i++) {
+            if (data1 === CC.R1 + i) {
+                if (data2 > 0) { // Button pressed
+                    host.println(`R${i+1}: Navigating to track ${i}`);
+                    navigateToTrack(i);
                 }
+                return; 
             }
         }
         
-        // --- Track Navigation --- 
-        if (data1 === CC.REW && data2 > 0) { 
-            navigateToTrack(currentTrackIndex - 1);
-            return;
-        }
-        if (data1 === CC.FF && data2 > 0) { 
-            navigateToTrack(currentTrackIndex + 1);
-            return;
+        // --- FF/RW Buttons (R Button Page Parameters 0 and 1) ---
+        if (rButtonPage) {
+            if (data1 === CC.FF && data2 > 0) {
+                host.println(`FF: Toggling R button page parameter 1`);
+                // Make sure we're on the correct page
+                rButtonPage.selectedPageIndex().set(R_BUTTON_PAGE_INDEX);
+                let parameter = rButtonPage.getParameter(1);
+                parameter.value().set(parameter.value().get() === 0 ? 127 : 0, 128);
+                return;
+            }
+            if (data1 === CC.REW && data2 > 0) {
+                host.println(`REW: Toggling R button page parameter 0`);
+                // Make sure we're on the correct page
+                rButtonPage.selectedPageIndex().set(R_BUTTON_PAGE_INDEX);
+                let parameter = rButtonPage.getParameter(0);
+                parameter.value().set(parameter.value().get() === 0 ? 127 : 0, 128);
+                return;
+            }
         }
 
         // --- Transport --- 
