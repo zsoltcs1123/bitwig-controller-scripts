@@ -2,7 +2,7 @@ loadAPI(18);
 host.setShouldFailOnDeprecatedUse(true);
 
 // Remove this if you want to be able to use deprecated methods without causing script to stop.
-host.defineController("Korg", "nanoKontrol2 Drum Machine Group", "0.1", "3c89f296-4535-4856-a201-c4556ed0ba1a", "Zsolt");
+host.defineController("Korg", "nanoKontrol2 Drum Machine Group Sub", "0.1", "3c89f296-4535-4856-a201-c4556ed0ba1a", "Zsolt");
 host.defineMidiPorts(1, 1);
 
 // --- Global Variables ---
@@ -80,27 +80,11 @@ function init() {
     groupCursorDevice = groupTrack.createCursorDevice("GroupDrumMachineCursor");
     groupRemoteControls = groupCursorDevice.createCursorRemoteControlsPage(8);
     groupSliderPage = groupCursorDevice.createCursorRemoteControlsPage("GroupSliderPage", 8, null);
-    groupSliderPage.selectedPageIndex().markInterested();
     groupDrumPadBank = groupCursorDevice.createDrumPadBank(8);
 
     groupRemoteControls.selectedPageIndex().markInterested();
-
-    // Add observer for group slider page index and ensure it stays on page 9
-    groupSliderPage.selectedPageIndex().addValueObserver((page) => {
-        host.println("Group Slider Page Index changed to: " + page);
-        // If page changes from our intended page, force it back
-        if (page !== SLIDER_PAGE_INDEX) {
-            host.println("Resetting slider page back to: " + SLIDER_PAGE_INDEX);
-            host.scheduleTask(() => {
-                groupSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX);
-            }, 100); // Small delay to avoid potential race conditions
-        }
-    });
-
-    // Set initial slider page index
-    host.scheduleTask(() => {
-        groupSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX);
-    }, 500); // Delay initial setting to ensure device is ready
+    groupSliderPage.selectedPageIndex().markInterested();
+    groupSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX); // Set fixed slider page index
 
     // Add observers for group drum pad mutes ONCE
     for (let i = 0; i < 8; i++) {
@@ -345,7 +329,6 @@ function onMidi(status, data1, data2) {
         if (data1 >= CC.SLIDER1 && data1 <= CC.SLIDER8) {
             if (!groupSliderPage) return; // Check if valid
             let index = data1 - CC.SLIDER1;
-            host.println("Slider " + (index + 1) + " value: " + data2 + " on page: " + groupSliderPage.selectedPageIndex().get());
             groupSliderPage.getParameter(index).set(data2, 128);
             return;
         }

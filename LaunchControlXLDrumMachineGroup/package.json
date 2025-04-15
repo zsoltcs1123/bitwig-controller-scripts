@@ -1,11 +1,11 @@
 {
-    "name": "LaunchControlXL Drum Machine Group",
+    "name": "LaunchControlXL Drum Machine",
     "vendor": "Novation",
     "version": "0.1.0",
     "author": "Zsolt",
-    "description": "Novation LaunchControlXL drum machine group script",
+    "description": "Novation LaunchControlXL drum machine script",
     "category": "Controller",
     "hardware_vendor": "Novation",
     "hardware_model": "LaunchControlXL",
-    "main": "LaunchControlXLDrumMachineGroup.control.js"
+    "main": "LaunchControlXLDrumMachine.control.js"
 } 
