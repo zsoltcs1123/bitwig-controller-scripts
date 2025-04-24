@@ -1,26 +1,21 @@
 Architecture:
-This LCXL script controls a Group Track with up to 8 child tracks. The Group Track always contains a Drum Machine and the child tracks are routed to this Drum Machine using Bitwig's Audio Receiver. This gives control over the child tracks.
+This LCXL script controls a Track with a Device on it that has 12 pages of Remote controls.
 
 The LCXL supports user modes. I want this script to be usable in User Mode 6. That means it should only work through Midi Channel 6.
 
-An important concept in this script is Track Fixing. This means that our controls don't follow the cursor as it usually does in scripts. We are fixing the control tracks independent of the cursor.
+An important concept in this script is Track Fixing. This means that our controls don't follow the cursor as it usually does in scripts. We are fixing the controlled Tracks independent of the cursor.
+
+Another important concepts for the Remote control pages is Fixed mode or Selection. If I say 'Fixed' it means a set of controls always control that specific page it is fixed to, regardless of the current page selection.
 
 
 Functionality:
 
-2nd row of buttons in: 
+1st row of buttons: DRUM PAD MUTES (if the Device is a Drum Machine)
+2nd Row of Buttons: SELECT remote control page 1 - 8
+SLIDERS: FIXED to remote control page 9
 
-'DEVICE MODE' = Set FIXED Child track 1 - 8
-'SOLO MODE' = Set REMOVE CONTROL PAGE 1-8
-'RECORD ARM' = SET FIXED GROUP track 1-8 OR Maybe Track sle
+1st row of knobs: FIXED to Remote Control Page  0
+2nd row of knobs: FIXED to Remote Control Page 11
+3nd row of knobs: Follows the current selected page
 
-These modes are called like so on the device but we used them for different purposes.
 
-1st row of buttons: DRUM PAD MUTES
-SLIDERS: Always fixed to remote control page index 10 of the GROUP TRACK (main mixer)
-
-1st row of knobs: always fixed to Remote Control Page 0 of the Group Track's Drum Machine
-2nd row of knobs: fixed to page 0 of the current fixed track
-3nd row of knobs: set to page 11 (sends) OR selected page
-
-Device button goes back page 10 from selection

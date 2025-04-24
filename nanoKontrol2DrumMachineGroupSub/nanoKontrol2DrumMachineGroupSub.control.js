@@ -19,11 +19,13 @@ let groupCursorDevice;  // Device for the group track
 let groupRemoteControls;// Knobs page for the group track
 let groupSliderPage;    // Sliders page for the group track (fixed index)
 let groupDrumPadBank;   // Drum pads for the group track
+let groupButtonsPage;   // Buttons page for the group track (fixed index 10)
 
 let childCursorDevice;  // Device for the selected child track
 let childRemoteControls;// Knobs page for the selected child track
 let childSliderPage;    // Sliders page for the child track (fixed index)
 let childDrumPadBank;   // Drum pads for the selected child track
+let childButtonsPage;   // Buttons page for the child track (fixed index 10)
 
 let targetGroupTrackIndex = 0; // Index of the main track bank scroll position
 let currentTrackIndex = 0; // Index of the child trackBank scroll position (0-7)
@@ -31,7 +33,6 @@ let currentPage = 0;       // The remote control page index (0-8) for KNOBS
 let midiOutPort;
 let transport;
 let isPlaying = false;
-let isRecording = false;
 
 // CC numbers for controls
 const CC = {
@@ -52,6 +53,17 @@ const CC = {
 
 const TRACK_BANK_SIZE = 8; // Number of child tracks to control
 const SLIDER_PAGE_INDEX = 9; // The 0-based index for the sliders page
+const BUTTONS_PAGE_INDEX = 10; // The 0-based index for the buttons page
+
+// Helper function to ensure slider pages are on correct page
+function ensureSliderPagesOnCorrectPage() {
+    if (groupSliderPage) {
+        groupSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX);
+    }
+    if (childSliderPage) {
+        childSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX);
+    }
+}
 
 // --- Initialization ---
 function init() {
@@ -77,14 +89,20 @@ function init() {
     // --- Initialize Group Track Controls (Done ONCE) ---
     // These API objects will automatically point to the correct track/device
     // when mainTrackBank scrolls, because they originate from groupTrack.
-    groupCursorDevice = groupTrack.createCursorDevice("GroupDrumMachineCursor");
+    const groupDeviceBank = groupTrack.createDeviceBank(1); // Create bank for first device slot
+    groupCursorDevice = groupDeviceBank.getDevice(0);     // Get the device itself
+    groupCursorDevice.exists().markInterested();         // Monitor existence
+    groupCursorDevice.name().markInterested();           // Monitor name
     groupRemoteControls = groupCursorDevice.createCursorRemoteControlsPage(8);
     groupSliderPage = groupCursorDevice.createCursorRemoteControlsPage("GroupSliderPage", 8, null);
     groupDrumPadBank = groupCursorDevice.createDrumPadBank(8);
+    groupButtonsPage = groupCursorDevice.createCursorRemoteControlsPage("GroupButtonsPage", 8, null); // Create buttons page
 
     groupRemoteControls.selectedPageIndex().markInterested();
     groupSliderPage.selectedPageIndex().markInterested();
     groupSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX); // Set fixed slider page index
+    groupButtonsPage.selectedPageIndex().markInterested();
+    groupButtonsPage.selectedPageIndex().set(BUTTONS_PAGE_INDEX); // Set fixed buttons page index
 
     // Add observers for group drum pad mutes ONCE
     for (let i = 0; i < 8; i++) {
@@ -107,6 +125,30 @@ function init() {
         }
     });
 
+    // Add observer for group slider page changes
+    groupSliderPage.selectedPageIndex().addValueObserver((page) => {
+        if (page !== SLIDER_PAGE_INDEX) {
+            host.println("Group slider page changed from " + SLIDER_PAGE_INDEX + " to " + page + ", correcting...");
+            groupSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX);
+        }
+    });
+
+    // Add observer for group buttons page changes
+    groupButtonsPage.selectedPageIndex().addValueObserver((page) => {
+        if (page !== BUTTONS_PAGE_INDEX) {
+            host.println("Group buttons page changed from " + BUTTONS_PAGE_INDEX + " to " + page + ", correcting...");
+            groupButtonsPage.selectedPageIndex().set(BUTTONS_PAGE_INDEX);
+        }
+    });
+
+    // Add observer for group REC button parameter (param 0 on buttons page)
+    groupButtonsPage.getParameter(0).value().markInterested();
+    groupButtonsPage.getParameter(0).value().addValueObserver((value) => {
+        if (cursorDevice === groupCursorDevice) {
+            sendMidi(0xB0, CC.REC, value > 0 ? 127 : 0);
+        }
+    });
+
     // --- Create Child Track Bank (connected to groupTrack) ---
     // This bank will automatically show children of the currently scrolled groupTrack.
     trackBank = groupTrack.createTrackBank(TRACK_BANK_SIZE, 0, 0, false);
@@ -117,14 +159,20 @@ function init() {
 
     // --- Initialize Child Track Controls (Done ONCE) ---
     // These controls follow fixedTrack -> trackBank -> groupTrack -> mainTrackBank.
-    childCursorDevice = fixedTrack.createCursorDevice("ChildDrumMachineCursor");
+    const childDeviceBank = fixedTrack.createDeviceBank(1); // Create bank for first device slot
+    childCursorDevice = childDeviceBank.getDevice(0);     // Get the device itself
+    childCursorDevice.exists().markInterested();         // Monitor existence
+    childCursorDevice.name().markInterested();           // Monitor name
     childRemoteControls = childCursorDevice.createCursorRemoteControlsPage(8);
     childSliderPage = childCursorDevice.createCursorRemoteControlsPage("ChildSliderPage", 8, null);
     childDrumPadBank = childCursorDevice.createDrumPadBank(8);
+    childButtonsPage = childCursorDevice.createCursorRemoteControlsPage("ChildButtonsPage", 8, null); // Create buttons page
 
     childRemoteControls.selectedPageIndex().markInterested();
     childSliderPage.selectedPageIndex().markInterested();
     childSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX); // Set fixed slider page index
+    childButtonsPage.selectedPageIndex().markInterested();
+    childButtonsPage.selectedPageIndex().set(BUTTONS_PAGE_INDEX); // Set fixed buttons page index
 
     // Add observers for child drum pad mutes ONCE
     for (let i = 0; i < 8; i++) {
@@ -147,6 +195,30 @@ function init() {
         }
     });
 
+    // Add observer for child slider page changes
+    childSliderPage.selectedPageIndex().addValueObserver((page) => {
+        if (page !== SLIDER_PAGE_INDEX) {
+            host.println("Child slider page changed from " + SLIDER_PAGE_INDEX + " to " + page + ", correcting...");
+            childSliderPage.selectedPageIndex().set(SLIDER_PAGE_INDEX);
+        }
+    });
+
+    // Add observer for child buttons page changes
+    childButtonsPage.selectedPageIndex().addValueObserver((page) => {
+        if (page !== BUTTONS_PAGE_INDEX) {
+            host.println("Child buttons page changed from " + BUTTONS_PAGE_INDEX + " to " + page + ", correcting...");
+            childButtonsPage.selectedPageIndex().set(BUTTONS_PAGE_INDEX);
+        }
+    });
+
+    // Add observer for child REC button parameter (param 0 on buttons page)
+    childButtonsPage.getParameter(0).value().markInterested();
+    childButtonsPage.getParameter(0).value().addValueObserver((value) => {
+        if (cursorDevice === childCursorDevice) {
+            sendMidi(0xB0, CC.REC, value > 0 ? 127 : 0);
+        }
+    });
+
     // --- Observer for Group Track Changes (mainTrackBank scroll) ---
     mainTrackBank.scrollPosition().addValueObserver((newIndex) => {
         host.println("Main group track scrolled to index: " + newIndex);
@@ -163,14 +235,9 @@ function init() {
     // --- Create Transport Object ---
     transport = host.createTransport();
     transport.isPlaying().markInterested();
-    transport.isArrangerRecordEnabled().markInterested();
 
     transport.isPlaying().addValueObserver((on) => {
         isPlaying = on;
-        updatePageLeds();
-    });
-    transport.isArrangerRecordEnabled().addValueObserver((on) => {
-        isRecording = on;
         updatePageLeds();
     });
 
@@ -201,6 +268,9 @@ function selectChildTrack(index) {
         currentPage = 0;
         if (remoteControls) remoteControls.selectedPageIndex().set(0); // Tell Bitwig to change page
         
+        // Ensure slider pages stay on page 9
+        ensureSliderPagesOnCorrectPage();
+        
         // fixedTrack should now point to the scrolled child due to trackBank.scrollPosition().set()
         // Wait a tiny moment for the API to potentially update the name if needed?
         // host.scheduleTask(() => { // Might not be necessary
@@ -229,6 +299,9 @@ function switchToGroupMode(targetPage) {
     
     currentPage = targetPage;
     if (remoteControls) remoteControls.selectedPageIndex().set(targetPage); // Tell Bitwig to change page
+    
+    // Ensure slider pages stay on page 9
+    ensureSliderPagesOnCorrectPage();
     
     // groupTrack should point to the current group track due to mainTrackBank scrolling
     host.showPopupNotification("Selected Group: " + groupTrack.name().get() + " (Page " + currentPage + ")");
@@ -264,7 +337,15 @@ function updatePageLeds() {
 
     // Transport buttons
     sendMidi(0xB0, CC.PLAY, transport.isPlaying().get() ? 127 : 0); // Use .get() for marked values
-    sendMidi(0xB0, CC.REC, transport.isArrangerRecordEnabled().get() ? 127 : 0);
+
+    // Update REC LED based on current device's button page parameter 0
+    let currentButtonsPage = (cursorDevice === groupCursorDevice) ? groupButtonsPage : childButtonsPage;
+    if (currentButtonsPage) {
+        let paramValue = currentButtonsPage.getParameter(0).value().get();
+        sendMidi(0xB0, CC.REC, paramValue > 0 ? 127 : 0);
+    } else {
+        sendMidi(0xB0, CC.REC, 0); // Turn off if no valid device/page
+    }
     
     // Group mode / Page LEDs (REW/FF)
     // Light up REW if in group mode on page 0
@@ -325,11 +406,12 @@ function onMidi(status, data1, data2) {
             return;
         }
 
-        // --- Sliders (Always control Group Slider Page) ---
+        // --- Sliders (Control current mode's Slider Page) ---
         if (data1 >= CC.SLIDER1 && data1 <= CC.SLIDER8) {
-            if (!groupSliderPage) return; // Check if valid
+            let sliderPage = (cursorDevice === groupCursorDevice) ? groupSliderPage : childSliderPage;
+            if (!sliderPage) return; // Check if valid
             let index = data1 - CC.SLIDER1;
-            groupSliderPage.getParameter(index).set(data2, 128);
+            sliderPage.getParameter(index).set(data2, 128);
             return;
         }
 
@@ -344,7 +426,17 @@ function onMidi(status, data1, data2) {
         // --- Transport --- 
         if (data1 === CC.PLAY && data2 > 0) { transport.play(); return; }
         if (data1 === CC.STOP && data2 > 0) { transport.stop(); return; }
-        if (data1 === CC.REC && data2 > 0) { transport.record(); return; }
+        if (data1 === CC.REC && data2 > 0) { 
+            let currentButtonsPage = (cursorDevice === groupCursorDevice) ? groupButtonsPage : childButtonsPage;
+            if (currentButtonsPage) {
+                let param = currentButtonsPage.getParameter(0);
+                let currentValue = param.value().get();
+                // Toggle logic: set to 127 (max) if currently 0, else set to 0
+                param.set(currentValue > 0 ? 0 : 127, 128); 
+                // Observer will update the LED
+            }
+            return; 
+        }
         if (data1 === CC.CYCLE && data2 > 0) { transport.toggleLoop(); return; }
 
         // --- Remote Controls (Knobs - use currently active 'remoteControls') --- 
@@ -403,6 +495,8 @@ function onSysex(data) {
 function exit() {
     host.println("nanoKontrol2 Drum Machine exiting...");
     // Turn off all LEDs
+    // Clear REC LED specifically as well
+    try { sendMidi(0xB0, CC.REC, 0); } catch(e) {} 
     for (let cc = 0; cc < 128; cc++) { // Send 0 to all CCs just in case
          try { sendMidi(0xB0, cc, 0); } catch(e) {}
     }

@@ -11,9 +11,10 @@ host.defineController(
 );
 host.defineMidiPorts(1, 1);
 
+
 // --- Constants ---
 const TARGET_MIDI_CHANNEL = 5; // 0-indexed for MIDI Channel 6 (User Mode 6)
-const DEBUG = true; // Set to false to disable verbose console logging
+const DEBUG = false; // Set to false to disable verbose console logging
 const TARGET_TEMPLATE_INDEX = 5; // User Mode 6 (Templates 0-7 are User)
 
 /**
@@ -64,8 +65,8 @@ const UTILITY_BUTTON_MAP = {
 // --- Mode Constants ---
 const MODE_MUTE = 'MUTE';
 const MODE_SOLO = 'SOLO';
-const MODE_PAGE = 'PAGE';   // Top row default
-const MODE_TRACK = 'TRACK'; // Top row alternate (RecArm active)
+const MODE_TRACK = 'TRACK';   // Now targets bottom row
+const MODE_PAGE = 'PAGE';     // Top row is now exclusively for page selection
 
 // --- Globals ---
 let midiIn;
@@ -77,13 +78,21 @@ let drumPadBank;
 let remoteControlsPage0;  // Top Knobs - FIXED page 0
 let remoteControlsPage9;  // Sliders - FIXED page 9
 let remoteControlsPage10; // Utility Buttons - FIXED page 10
-let remoteControlsPage11; // Middle Knobs - FIXED page 11
-let remoteControlsSelected; // Bottom Knobs - FOLLOWS SELECTION (pages 1-8)
+let remoteControlsPageSelect; // Bottom Knobs - FOLLOWS SELECTION (pages 1-8)
 let currentSelectedPage = 1; // Default to page 1 (index 1)
 const PAGE_SELECT_OFFSET = 1; // Buttons select pages 1-8
-let currentBottomRowMode = MODE_MUTE; // Mode for BOTTOM row buttons (Mute/Solo)
-let currentTopRowMode = MODE_PAGE;    // Mode for TOP row buttons (Page/Track Select)
+let currentBottomRowMode = MODE_MUTE; // Mode for bottom row buttons (Mute/Solo/Track)
 let currentFixedTrackIndex = 0; // Index of the track the bank is scrolled to (0-7)
+
+// NEW: Track bank for middle knob control
+let middleKnobTrackBank;
+let middleKnobDevices = [];
+let middleKnobControls = [];
+
+// Track handling
+let childTrackBank; // Bank of child tracks for the fixed track
+let childTrackDevices = []; // Cursor devices for each child track
+let childTrackControls = []; // Remote control pages for each child track's device
 
 // Helper to get the MIDI note for a button index (0-7) and row ('T' or 'B')
 function getNoteForButtonIndex(row, index) {
@@ -141,6 +150,7 @@ function getSysexIndexForSideButton(buttonType) {
     }
 }
 
+
 // Helper for Utility Button LEDs (Device, Arrows)
 function getSysexIndexForUtilityButton(buttonId) {
     const mapping = UTILITY_BUTTON_MAP[buttonId];
@@ -149,7 +159,7 @@ function getSysexIndexForUtilityButton(buttonId) {
 
 // --- Initialization ---
 function init() {
-    if (DEBUG) host.println("LCXL Drum Machine Group initializing...");
+    host.println("LCXL Drum Machine Group initializing...");
 
     midiIn = host.getMidiInPort(0);
     midiOut = host.getMidiOutPort(0);
@@ -169,9 +179,92 @@ function init() {
     fixedTrack.name().markInterested();
     trackBank.scrollPosition().markInterested(); // Need to know the scroll position
 
+    // NEW: Create separate track bank for middle knob control
+    middleKnobTrackBank = host.createTrackBank(8, 0, 0, false);
+    
+    // Initialize device and control objects for each track
+    for (let i = 0; i < 8; i++) {
+        const track = middleKnobTrackBank.getItemAt(i);
+        track.name().markInterested();
+        const device = track.createCursorDevice("MiddleKnobDevice" + i);
+        device.name().markInterested();
+        const controls = device.createCursorRemoteControlsPage("MiddleKnobControls" + i, 8, null);
+        controls.selectedPageIndex().markInterested();
+        // Force to page 0
+        controls.selectedPageIndex().set(0);
+        
+        middleKnobDevices[i] = device;
+        middleKnobControls[i] = controls;
+
+        // Add observers for parameter existence
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            controls.getParameter(paramIndex).exists().addValueObserver((exists) => {
+                host.println(`Middle Knob Track ${i + 1} Param ${paramIndex} Exists: ${exists}`);
+                updateMiddleKnobLeds();
+            });
+        }
+    }
+
+    // Create child track bank for the fixed track
+    childTrackBank = fixedTrack.createTrackBank(8, 0, 0, false);
+    
+    // Initialize device and control objects for each child track
+    for (let i = 0; i < 8; i++) {
+        const childTrack = childTrackBank.getItemAt(i);
+        childTrack.name().markInterested();
+        
+        // Create a device bank and set instrument matcher
+        const deviceBank = childTrack.createDeviceBank(1);
+        const instrumentMatcher = host.createInstrumentMatcher();
+        deviceBank.setDeviceMatcher(instrumentMatcher);
+        const device = deviceBank.getDevice(0);
+        device.name().markInterested();
+        device.exists().markInterested();
+        
+        const controls = device.createCursorRemoteControlsPage("ChildTrackControls" + i, 8, null);
+        controls.selectedPageIndex().markInterested();
+        // Force to page 0
+        controls.selectedPageIndex().set(0);
+        
+        childTrackDevices[i] = device;
+        childTrackControls[i] = controls;
+
+        // Add observers for parameter existence
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            controls.getParameter(paramIndex).exists().addValueObserver((exists) => {
+                host.println(`Child Track ${i} Param ${paramIndex} Exists: ${exists}`);
+                updateMiddleKnobLeds();
+            });
+        }
+
+        // Observer for track existence
+        childTrack.exists().markInterested();
+        childTrack.exists().addValueObserver((exists) => {
+            host.println(`Child Track ${i} Exists: ${exists}`);
+            updateMiddleKnobLeds();
+        });
+
+        // Observer for device existence
+        device.exists().addValueObserver((exists) => {
+            host.println(`Child Track ${i} First Device Exists: ${exists}`);
+            updateMiddleKnobLeds();
+        });
+    }
+
     // --- Create Device and Control Objects ---
-    cursorDevice = fixedTrack.createCursorDevice("LCXL_Device");
+    // Create a device bank for the fixed track, looking only at the first device slot.
+    const deviceBank = fixedTrack.createDeviceBank(1);
+    // Create an instrument matcher using the correct method
+    const instrumentMatcher = host.createInstrumentMatcher();
+    deviceBank.setDeviceMatcher(instrumentMatcher);
+    // Get the device at index 0 within this bank.
+    cursorDevice = deviceBank.getDevice(0);
+    cursorDevice.exists().markInterested(); // Monitor if the first device exists
     cursorDevice.name().markInterested(); // Log device name
+
+    // Mark group expansion state as interested
+    fixedTrack.isGroup().markInterested();
+    fixedTrack.isGroupExpanded().markInterested();
 
     // Drum Pad Bank (for Top Buttons - Mutes)
     drumPadBank = cursorDevice.createDrumPadBank(8);
@@ -192,25 +285,20 @@ function init() {
     remoteControlsPage10.selectedPageIndex().markInterested();
     remoteControlsPage10.selectedPageIndex().set(10); // Fix to page index 10
 
-    // Fixed Remote Controls Page 11 (Middle Knobs)
-    remoteControlsPage11 = cursorDevice.createCursorRemoteControlsPage("FixedPage11_MidKnobs", 8, null);
-    remoteControlsPage11.selectedPageIndex().markInterested();
-    remoteControlsPage11.selectedPageIndex().set(11); // Fix to page index 11
-
     // Selectable Remote Controls Page (Bottom Knobs / Page Select Buttons)
     // This is the 'main' unnamed page object that we change the index of.
-    remoteControlsSelected = cursorDevice.createCursorRemoteControlsPage(8);
-    remoteControlsSelected.selectedPageIndex().markInterested();
-    remoteControlsSelected.pageNames().markInterested(); // Good for debugging
+    remoteControlsPageSelect = cursorDevice.createCursorRemoteControlsPage(8);
+    remoteControlsPageSelect.selectedPageIndex().markInterested();
+    remoteControlsPageSelect.pageNames().markInterested(); // Good for debugging
     // Set initial selected page (must be >= PAGE_SELECT_OFFSET)
-    remoteControlsSelected.selectedPageIndex().set(currentSelectedPage);
+    remoteControlsPageSelect.selectedPageIndex().set(currentSelectedPage);
 
     // --- Observers ---
 
     // Track Name Observer (Now reflects the name of the track at the window's index 0)
     fixedTrack.name().addValueObserver((name) => {
         const trackName = name || "[Empty Slot]";
-        if (DEBUG) host.println(`Fixed Track (${currentFixedTrackIndex + 1}): ${trackName}`);
+        host.println(`Fixed Track (${currentFixedTrackIndex + 1}): ${trackName}`);
         // Keep notification simple or add track index?
         // host.showPopupNotification(`Controlling Track: ${trackName}`);
     });
@@ -218,48 +306,69 @@ function init() {
     // Scroll Position Observer (Tracks the fixed track index)
     trackBank.scrollPosition().addValueObserver(newIndex => {
         currentFixedTrackIndex = newIndex;
-        if (DEBUG) host.println(`Track Bank scrolled to index: ${newIndex}`);
+        host.println(`Track Bank scrolled to index: ${newIndex}`);
         // Update TOP row LEDs if in TRACK select mode
-        if (currentTopRowMode === MODE_TRACK) {
-            updateTopRow_Mode();
+        if (currentBottomRowMode === MODE_TRACK) {
+            updateBottomRow_Mode();
         }
+        // Update middle knob LEDs since child tracks may have changed
+        updateMiddleKnobLeds();
         host.showPopupNotification(`Fixed Track: ${newIndex + 1}`);
+    });
+
+    // Device Existence Observer (for the first device slot)
+    cursorDevice.exists().addValueObserver((exists) => {
+        host.println("First Device on Fixed Track Exists: " + exists);
+        // Re-initialize LEDs and parameters if the first device appears/disappears
+        // TODO: Consider re-fetching parameters or clearing state if device disappears?
+        updateAllLeds(); // Update LEDs based on new existence status
     });
 
     // Device Name Observer
     cursorDevice.name().addValueObserver((name) => {
-        if (DEBUG) host.println("Device on Fixed Track: " + (name || "[No Device]"));
+        host.println("Device on Fixed Track: " + (name || "[No Device]"));
         // Re-initialize LEDs if device changes (drum pad bank AND parameters might appear/disappear)
         updateAllLeds();
     });
 
+    // Group track observers
+    fixedTrack.isGroup().addValueObserver((isGroup) => {
+        host.println(`Fixed Track Is Group: ${isGroup}`);
+        updateUtilityButtonLeds(); // Update device button LED
+    });
+
+    fixedTrack.isGroupExpanded().addValueObserver((isExpanded) => {
+        host.println(`Fixed Track Is Expanded: ${isExpanded}`);
+        updateUtilityButtonLeds(); // Update device button LED
+    });
+
     // Drum Pad Bank Existence Observer
     drumPadBank.exists().addValueObserver((exists) => {
-        if (DEBUG) host.println("Drum Pad Bank Exists: " + exists);
+        host.println("Drum Pad Bank Exists: " + exists);
         // Update the BOTTOM row (Mute/Solo)
-        updateBottomRow_MuteSolo();
+        updateBottomRow_Mode();
     });
 
     // Drum Pad Mute & Solo Observers (for BOTTOM row LED feedback)
     for (let i = 0; i < 8; i++) {
         let drumPad = drumPadBank.getItemAt(i);
         drumPad.exists().addValueObserver((exists) => {
-             if (DEBUG) host.println(`Drum Pad ${i} Exists: ${exists}`);
+             host.println(`Drum Pad ${i} Exists: ${exists}`);
              // Update the BOTTOM row
-             updateBottomRow_MuteSolo();
+             updateBottomRow_Mode();
         });
         drumPad.mute().addValueObserver((isMuted) => {
-            if (DEBUG) host.println(`Drum Pad ${i} Muted: ${isMuted}`);
+            host.println(`Drum Pad ${i} Muted: ${isMuted}`);
             // Only update if bottom row is in Mute mode
             if (currentBottomRowMode === MODE_MUTE) {
-                 updateBottomRow_MuteSolo();
+                 updateBottomRow_Mode();
             }
         });
         drumPad.solo().addValueObserver((isSoloed) => {
-            if (DEBUG) host.println(`Drum Pad ${i} Solo: ${isSoloed}`);
+            host.println(`Drum Pad ${i} Solo: ${isSoloed}`);
             // Only update if bottom row is in Solo mode
              if (currentBottomRowMode === MODE_SOLO) {
-                updateBottomRow_MuteSolo();
+                updateBottomRow_Mode();
             }
         });
     }
@@ -268,56 +377,45 @@ function init() {
     for (let i = 0; i < 8; i++) {
         // Top Knobs (Page 0)
         remoteControlsPage0.getParameter(i).exists().addValueObserver((exists) => {
-            if (DEBUG) host.println(`Top Knob Param ${i} Exists (Page 0): ${exists}`);
+            host.println(`Top Knob Param ${i} Exists (Page 0): ${exists}`);
             updateTopKnobLeds(); // Update all top knob LEDs
         });
         // Middle Knobs (Page 11)
-        remoteControlsPage11.getParameter(i).exists().addValueObserver((exists) => {
-            if (DEBUG) host.println(`Middle Knob Param ${i} Exists (Page 11): ${exists}`);
-            updateMiddleKnobLeds(); // Update all middle knob LEDs
-        });
-        // Bottom Knobs (Selected Page)
-        remoteControlsSelected.getParameter(i).exists().addValueObserver((exists) => {
-            if (DEBUG) host.println(`Bottom Knob Param ${i} Exists (Page ${currentSelectedPage}): ${exists}`);
+        remoteControlsPageSelect.getParameter(i).exists().addValueObserver((exists) => {
+            host.println(`Bottom Knob Param ${i} Exists (Page ${currentSelectedPage}): ${exists}`);
             updateBottomKnobLeds(); // Update all bottom knob LEDs
         });
     }
 
     // Observer for Selected Page Index (needs to update TOP row LEDs now)
-    remoteControlsSelected.selectedPageIndex().addValueObserver((pageIndex) => {
+    remoteControlsPageSelect.selectedPageIndex().addValueObserver((pageIndex) => {
         currentSelectedPage = pageIndex;
-        if (DEBUG) host.println("Selected Remote Page Index Changed To: " + pageIndex);
-        // Update page select LEDs (TOP row) only if in PAGE mode
-        if (currentTopRowMode === MODE_PAGE) {
-             updateTopRow_Mode();
-        }
+        host.println("Selected Remote Page Index Changed To: " + pageIndex);
+        // Always update page select LEDs (top row) when page changes
+        updateTopRow_PageSelect();
         // Update bottom knob LEDs (still tied to selected page)
         updateBottomKnobLeds();
+        // Update middle knob LEDs since they depend on page selection
+        updateMiddleKnobLeds();
     });
 
     // Observers to keep fixed pages fixed (error checking)
     remoteControlsPage0.selectedPageIndex().addValueObserver((index) => {
         if (index !== 0) {
-            if (DEBUG) host.println(`WARN: Fixed Page 0 index (${index}) changed. Forcing back.`);
+            host.println(`WARN: Fixed Page 0 index (${index}) changed. Forcing back.`);
             remoteControlsPage0.selectedPageIndex().set(0);
         }
     });
     remoteControlsPage9.selectedPageIndex().addValueObserver((index) => {
         if (index !== 9) {
-            if (DEBUG) host.println(`WARN: Fixed Page 9 (Sliders) index (${index}) changed. Forcing back.`);
+            host.println(`WARN: Fixed Page 9 (Sliders) index (${index}) changed. Forcing back.`);
             remoteControlsPage9.selectedPageIndex().set(9);
         }
     });
     remoteControlsPage10.selectedPageIndex().addValueObserver((index) => {
         if (index !== 10) {
-            if (DEBUG) host.println(`WARN: Fixed Page 10 (Utility) index (${index}) changed. Forcing back.`);
+            host.println(`WARN: Fixed Page 10 (Utility) index (${index}) changed. Forcing back.`);
             remoteControlsPage10.selectedPageIndex().set(10);
-        }
-    });
-    remoteControlsPage11.selectedPageIndex().addValueObserver((index) => {
-        if (index !== 11) {
-            if (DEBUG) host.println(`WARN: Fixed Page 11 (Mid Knobs) index (${index}) changed. Forcing back.`);
-            remoteControlsPage11.selectedPageIndex().set(11);
         }
     });
 
@@ -330,15 +428,15 @@ function init() {
             // if (DEBUG) host.println(`Init: Utility Param ${mapping.paramIndex} (${buttonId}) on Page 10 Exists: ${parameter.exists().get()}`);
 
             parameter.value().addValueObserver(value => {
-                if (DEBUG) host.println(`Utility Button Param ${mapping.paramIndex} (${buttonId}) Value Changed: ${value}`);
+                host.println(`Utility Button Param ${mapping.paramIndex} (${buttonId}) Value Changed: ${value}`);
                 updateUtilityButtonLeds();
             });
             parameter.exists().addValueObserver(exists => {
-                 if (DEBUG) host.println(`Utility Button Param ${mapping.paramIndex} (${buttonId}) Exists on Page 10: ${exists}`);
+                 host.println(`Utility Button Param ${mapping.paramIndex} (${buttonId}) Exists on Page 10: ${exists}`);
                  updateUtilityButtonLeds();
              });
         } else {
-             if (DEBUG) host.println(`WARN: remoteControlsPage10 not initialized for utility observers.`);
+             host.println(`WARN: remoteControlsPage10 not initialized for utility observers.`);
         }
     }
 
@@ -346,7 +444,7 @@ function init() {
     // Send initial MIDI messages to LCXL (set initial LED states)
     updateAllLeds(); // Call a function to set initial LED states
 
-    if (DEBUG) host.println("LCXL Drum Machine Group initialized successfully with API objects and All Observers.");
+    host.println("LCXL Drum Machine Group initialized successfully with API objects and All Observers.");
 }
 
 // --- MIDI Callback ---
@@ -381,64 +479,59 @@ function handleCC(cc, value) {
         for (const buttonId in UTILITY_BUTTON_MAP) {
             const mapping = UTILITY_BUTTON_MAP[buttonId];
             if (mapping.cc === cc) {
-                if (DEBUG) host.println(`-> Utility Button CC: ${buttonId} (CC ${cc}) -> Target Page 10`);
-                if (remoteControlsPage10) { // Check Page 10
+                host.println(`-> Utility Button CC: ${buttonId} (CC ${cc}) -> Target Page 10`);
+                if (remoteControlsPage10) {
                     const parameter = remoteControlsPage10.getParameter(mapping.paramIndex);
                      if (parameter.exists().get()) {
-                        if (DEBUG) host.println(`     -> Param ${mapping.paramIndex} exists on Page 10. Toggling value.`);
+                        host.println(`     -> Param ${mapping.paramIndex} exists on Page 10. Toggling value.`);
                         const currentValue = parameter.value().get();
                         parameter.value().set(currentValue === 0 ? 127 : 0, 128);
                      } else {
-                         if (DEBUG) host.println(`     -> Param ${mapping.paramIndex} does NOT exist on Page 10.`);
+                         host.println(`     -> Param ${mapping.paramIndex} does NOT exist on Page 10.`);
                      }
                 } else {
-                    if (DEBUG) host.println(`     -> remoteControlsPage10 object is NOT available.`);
+                    host.println(`     -> remoteControlsPage10 object is NOT available.`);
                 }
                 return; // Consume CC
             }
         }
     }
 
-    // Ensure API objects are ready for Knobs/Sliders
-    if (!remoteControlsPage0 || !remoteControlsPage9 || !remoteControlsPage11 || !remoteControlsSelected) {
-        // Note: remoteControlsPage10 check removed here as it's only for utility buttons
-        if (DEBUG) host.println("WARN: API objects not ready in handleCC for Knobs/Sliders");
-        return;
-    }
-
-    const paramIndex = findParameterIndex(cc); // Find which knob/slider (0-7)
+    const paramIndex = findParameterIndex(cc);
     if (paramIndex === -1) {
-        if (DEBUG) host.println(`  -> Unmapped CC ${cc} received, value ${value}`);
-        return; // CC doesn't match any known controls
+        host.println(`  -> Unmapped CC ${cc} received, value ${value}`);
+        return;
     }
 
     // Top Knobs (FIXED Page 0)
     if (cc >= CC.KNOB_T1 && cc <= CC.KNOB_T8) {
-        if (DEBUG) host.println(`  -> Top Knob ${paramIndex + 1} (CC ${cc}) -> Page 0, Param ${paramIndex}`);
-        // Ensure page is still correct (should be due to observer, but belt-and-suspenders)
-        // remoteControlsPage0.selectedPageIndex().set(0);
+        host.println(`  -> Top Knob ${paramIndex + 1} (CC ${cc}) -> Page 0, Param ${paramIndex}`);
         remoteControlsPage0.getParameter(paramIndex).set(value, 128);
     }
-    // Middle Knobs (FIXED Page 11)
+    // Middle Knobs (Now controls child track's page 0 based on page selection)
     else if (cc >= CC.KNOB_M1 && cc <= CC.KNOB_M8) {
-        if (DEBUG) host.println(`  -> Middle Knob ${paramIndex + 1} (CC ${cc}) -> Page 11, Param ${paramIndex}`);
-        // remoteControlsPage11.selectedPageIndex().set(11);
-        remoteControlsPage11.getParameter(paramIndex).set(value, 128);
+        // Map currentSelectedPage (1-8) to child track index (0-7)
+        const childTrackIndex = currentSelectedPage - PAGE_SELECT_OFFSET;
+        if (childTrackIndex >= 0 && childTrackIndex < 8) {
+            host.println(`  -> Middle Knob ${paramIndex + 1} (CC ${cc}) -> Child Track ${childTrackIndex}, Page 0, Param ${paramIndex}`);
+            const controls = childTrackControls[childTrackIndex];
+            if (controls) {
+                controls.getParameter(paramIndex).set(value, 128);
+            }
+        }
     }
     // Bottom Knobs (FOLLOWS Selected Page 1-8)
     else if (cc >= CC.KNOB_B1 && cc <= CC.KNOB_B8) {
-        if (DEBUG) host.println(`  -> Bottom Knob ${paramIndex + 1} (CC ${cc}) -> Page ${currentSelectedPage}, Param ${paramIndex}`);
-        // No need to set page index here, it's controlled by buttons/observer
-        remoteControlsSelected.getParameter(paramIndex).set(value, 128);
+        host.println(`  -> Bottom Knob ${paramIndex + 1} (CC ${cc}) -> Page ${currentSelectedPage}, Param ${paramIndex}`);
+        remoteControlsPageSelect.getParameter(paramIndex).set(value, 128);
     }
     // Sliders (FIXED Page 9)
     else if (cc >= CC.SLIDER1 && cc <= CC.SLIDER8) {
-        if (DEBUG) host.println(`  -> Slider ${paramIndex + 1} (CC ${cc}) -> Page 9, Param ${paramIndex}`);
-        // remoteControlsPage9.selectedPageIndex().set(9);
+        host.println(`  -> Slider ${paramIndex + 1} (CC ${cc}) -> Page 9, Param ${paramIndex}`);
         remoteControlsPage9.getParameter(paramIndex).set(value, 128);
     } else {
         // This case should ideally not be reached due to findParameterIndex check
-        if (DEBUG) host.println(`  -> CC ${cc} wasn't mapped to a known control row.`);
+        host.println(`  -> CC ${cc} wasn't mapped to a known control row.`);
     }
 }
 
@@ -446,92 +539,92 @@ function handleNoteOn(note, velocity) {
     // Mode Buttons (Mute, Solo, Rec Arm)
     if (note === NOTE.BTN_MUTE) {
         if (currentBottomRowMode !== MODE_MUTE) {
-             if (DEBUG) host.println("-> Bottom Row Mode changed to MUTE");
+             host.println("-> Bottom Row Mode changed to MUTE");
              currentBottomRowMode = MODE_MUTE;
-             updateModeButtonLeds(); // Update Mute/Solo indicators
-             updateBottomRow_MuteSolo(); // Update bottom row LEDs for the new mode
+             updateModeButtonLeds(); // Update Mute/Solo/RecArm indicators
+             updateBottomRow_Mode(); // Update bottom row LEDs for the new mode
         }
         return; // Consume the event
     }
     if (note === NOTE.BTN_SOLO) {
         if (currentBottomRowMode !== MODE_SOLO) {
-            if (DEBUG) host.println("-> Bottom Row Mode changed to SOLO");
+            host.println("-> Bottom Row Mode changed to SOLO");
             currentBottomRowMode = MODE_SOLO;
-            updateModeButtonLeds(); // Update Mute/Solo indicators
-            updateBottomRow_MuteSolo(); // Update bottom row LEDs for the new mode
+            updateModeButtonLeds(); // Update Mute/Solo/RecArm indicators
+            updateBottomRow_Mode(); // Update bottom row LEDs for the new mode
         }
          return; // Consume the event
     }
      if (note === NOTE.BTN_REC_ARM) {
-        // Toggle Top Row mode between Page and Track
-        currentTopRowMode = (currentTopRowMode === MODE_PAGE) ? MODE_TRACK : MODE_PAGE;
-        if (DEBUG) host.println(`-> Top Row Mode changed to ${currentTopRowMode}`);
+        // Now toggles bottom row to Track mode
+        if (currentBottomRowMode !== MODE_TRACK) {
+            host.println("-> Bottom Row Mode changed to TRACK");
+            currentBottomRowMode = MODE_TRACK;
+        } else {
+            host.println("-> Bottom Row Mode changed to MUTE (from TRACK)");
+            currentBottomRowMode = MODE_MUTE;
+        }
         updateModeButtonLeds(); // Update RecArm indicator
-        updateTopRow_Mode(); // Update top row LEDs for the new mode
+        updateBottomRow_Mode(); // Update bottom row LEDs for the new mode
         return; // Consume the event
     }
 
     // Check for Utility Device Button Note
     if (note === NOTE.DEVICE_BTN) {
-         if (DEBUG) host.println(`-> Utility Button Note: DEVICE (Note ${note}) -> Target Page 10`);
-         if (remoteControlsPage10) { // Check Page 10
-            const mapping = UTILITY_BUTTON_MAP['DEVICE'];
-            const parameter = remoteControlsPage10.getParameter(mapping.paramIndex);
-            if (parameter.exists().get()) {
-                const currentValue = parameter.value().get();
-                parameter.value().set(currentValue === 0 ? 127 : 0, 128);
-            }
-         }
-         return; // Consume Note
+        host.println(`-> Device Button pressed - Toggle Group Expansion`);
+        if (fixedTrack.isGroup().get()) {
+            fixedTrack.isGroupExpanded().toggle();
+        }
+        return; // Consume Note
     }
 
     // Ensure API objects are ready for other buttons
-     if (!drumPadBank || !remoteControlsSelected) {
-        if (DEBUG) host.println("WARN: API objects not ready in handleNoteOn for regular buttons");
+     if (!drumPadBank || !remoteControlsPageSelect) {
+        host.println("WARN: API objects not ready in handleNoteOn for regular buttons");
         return;
     }
 
-    const buttonIndex = findButtonIndex(note); // Find which button (0-7)
+    const buttonIndex = findButtonIndex(note);
      if (buttonIndex === -1) {
         // Only log if it wasn't a mode button we already handled
         if (note !== NOTE.BTN_MUTE && note !== NOTE.BTN_SOLO && note !== NOTE.BTN_REC_ARM) {
-            if (DEBUG) host.println(`  -> Unmapped Note ${note} ON received, velocity ${velocity}`);
+            host.println(`  -> Unmapped Note ${note} ON received, velocity ${velocity}`);
         }
         return; // Note doesn't match any known buttons
     }
 
-    // Top Buttons (Page Select / Track Select)
+    // Top Buttons (Page Select ONLY)
     if (note >= NOTE.BTN_T1 && note <= NOTE.BTN_T8) {
-        if (DEBUG) host.println(`  -> Top Button ${buttonIndex + 1} (Note ${note}) in mode ${currentTopRowMode}`);
-        if (currentTopRowMode === MODE_PAGE) {
+        host.println(`  -> Top Button ${buttonIndex + 1} (Note ${note}) - Page Select`);
             const targetPage = buttonIndex + PAGE_SELECT_OFFSET;
-            if (DEBUG) host.println(`     -> Selecting Page ${targetPage}`);
-            remoteControlsSelected.selectedPageIndex().set(targetPage);
+            host.println(`     -> Selecting Page ${targetPage}`);
+        remoteControlsPageSelect.selectedPageIndex().set(targetPage);
             // Observer updates LEDs
-        } else { // MODE_TRACK
-             if (DEBUG) host.println(`     -> Selecting Fixed Track Index ${buttonIndex}`);
-             trackBank.scrollPosition().set(buttonIndex);
-             // Observer updates LEDs
-        }
         return; // Consume event
     }
-    // Bottom Buttons (Mute / Solo)
+    // Bottom Buttons (Mute / Solo / Track)
     else if (note >= NOTE.BTN_B1 && note <= NOTE.BTN_B8) {
-        if (DEBUG) host.println(`  -> Bottom Button ${buttonIndex + 1} (Note ${note}) in mode ${currentBottomRowMode}`);
+        host.println(`  -> Bottom Button ${buttonIndex + 1} (Note ${note}) in mode ${currentBottomRowMode}`);
+        switch(currentBottomRowMode) {
+            case MODE_MUTE:
+            case MODE_SOLO:
         if (drumPadBank.exists().get()) {
             const drumPad = drumPadBank.getItemAt(buttonIndex);
             if (drumPad.exists().get()) {
-                 switch(currentBottomRowMode) {
-                    case MODE_MUTE:
-                        if (DEBUG) host.println(`     -> Toggling Mute ${buttonIndex}`);
+                        if (currentBottomRowMode === MODE_MUTE) {
+                        host.println(`     -> Toggling Mute ${buttonIndex}`);
                         drumPad.mute().toggle();
-                        break;
-                    case MODE_SOLO:
-                         if (DEBUG) host.println(`     -> Toggling Solo ${buttonIndex}`);
+                        } else {
+                         host.println(`     -> Toggling Solo ${buttonIndex}`);
                         drumPad.solo().toggle();
-                        break;
+                        }
+                    }
                 }
-            }
+                break;
+            case MODE_TRACK:
+                host.println(`     -> Selecting Fixed Track Index ${buttonIndex}`);
+                trackBank.scrollPosition().set(buttonIndex);
+                break;
         }
         return; // Consume event
     }
@@ -576,7 +669,7 @@ function flush() {
 
 // --- Exit Callback ---
 function exit() {
-    if (DEBUG) host.println("LCXL Drum Machine Group exiting...");
+    host.println("LCXL Drum Machine Group exiting...");
 
     // Turn off all LEDs using Sysex
     for (let i = 0; i < 8; i++) {
@@ -595,7 +688,7 @@ function exit() {
          sendLedUpdateUtilityButton(buttonId, LED_COLOR.OFF);
     }
 
-    if (DEBUG) host.println("LCXL script finished cleanup.");
+    host.println("LCXL script finished cleanup.");
 }
 
 // --- Helper Functions ---
@@ -622,10 +715,9 @@ function sendMidi(status, data1, data2) {
 
 // --- LED Update Functions ---
 
-// Renamed - Now handles TOP row (Page Select / Track Select)
-function updateTopRow_Mode() {
-    if (DEBUG) host.println(`Updating Top Row (Mode: ${currentTopRowMode}) LEDs...`);
-    if (currentTopRowMode === MODE_PAGE) {
+// Renamed to reflect it now only handles page selection
+function updateTopRow_PageSelect() {
+    host.println("Updating Top Row (Page Select) LEDs...");
         // Page Select Mode - Amber Dim/Full
         for (let i = 0; i < 8; i++) {
             const targetPage = i + PAGE_SELECT_OFFSET;
@@ -633,39 +725,40 @@ function updateTopRow_Mode() {
             const color = isSelected ? LED_COLOR.AMBER_FULL : LED_COLOR.AMBER_LOW;
             sendLedUpdate('T', i, color);
         }
-    } else { // MODE_TRACK
-        // Track Select Mode - Red Dim/Full
-        for (let i = 0; i < 8; i++) {
-            const isSelectedTrack = (i === currentFixedTrackIndex);
-            const color = isSelectedTrack ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
-            sendLedUpdate('T', i, color);
-        }
-    }
 }
 
-// Renamed - Now handles BOTTOM row (Mute / Solo)
-function updateBottomRow_MuteSolo() {
-    if (DEBUG) host.println(`Updating Bottom Row (Mode: ${currentBottomRowMode}) LEDs...`);
-    if (!drumPadBank) return;
-    const bankExists = drumPadBank.exists().get();
+// Renamed to reflect it now handles all bottom row modes
+function updateBottomRow_Mode() {
+    host.println(`Updating Bottom Row (Mode: ${currentBottomRowMode}) LEDs...`);
 
     for (let i = 0; i < 8; i++) {
         let color = LED_COLOR.OFF;
-        if (bankExists) {
-            const drumPad = drumPadBank.getItemAt(i);
-            if (drumPad.exists().get()) {
+        
                 switch(currentBottomRowMode) {
                     case MODE_MUTE:
+                if (drumPadBank && drumPadBank.exists().get()) {
+                    const drumPad = drumPadBank.getItemAt(i);
+                    if (drumPad.exists().get()) {
                         const isMuted = drumPad.mute().get();
                         color = isMuted ? LED_COLOR.GREEN_FULL : LED_COLOR.GREEN_LOW;
+                    }
+                }
                         break;
                     case MODE_SOLO:
+                if (drumPadBank && drumPadBank.exists().get()) {
+                    const drumPad = drumPadBank.getItemAt(i);
+                    if (drumPad.exists().get()) {
                         const isSoloed = drumPad.solo().get();
                         color = isSoloed ? LED_COLOR.AMBER_FULL : LED_COLOR.AMBER_LOW;
-                        break;
                 }
             }
+                break;
+            case MODE_TRACK:
+                const isSelectedTrack = (i === currentFixedTrackIndex);
+                color = isSelectedTrack ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
+                break;
         }
+        
         sendLedUpdate('B', i, color);
     }
 }
@@ -673,7 +766,7 @@ function updateBottomRow_MuteSolo() {
 // --- NEW Knob LED Update Functions ---
 
 function updateTopKnobLeds() { // Top KNOBS (Page 0)
-    if (DEBUG) host.println("Updating Top Knob LEDs...");
+    host.println("Updating Top Knob LEDs...");
     if (!remoteControlsPage0) return;
     for (let i = 0; i < 8; i++) {
         const paramExists = remoteControlsPage0.getParameter(i).exists().get();
@@ -684,23 +777,30 @@ function updateTopKnobLeds() { // Top KNOBS (Page 0)
     }
 }
 
-function updateMiddleKnobLeds() { // Middle KNOBS (Page 11)
-     if (DEBUG) host.println("Updating Middle Knob LEDs...");
-    if (!remoteControlsPage11) return;
+function updateMiddleKnobLeds() {
+    host.println("Updating Middle Knob LEDs...");
+    const childTrackIndex = currentSelectedPage - PAGE_SELECT_OFFSET;
+    
     for (let i = 0; i < 8; i++) {
-        const paramExists = remoteControlsPage11.getParameter(i).exists().get();
-        // Use YELLOW_FULL (darker orange)
-        const color = paramExists ? LED_COLOR.YELLOW_FULL : LED_COLOR.OFF;
-         // Send update via Sysex using KNOB helper
+        let color = LED_COLOR.OFF;
+        if (childTrackIndex >= 0 && childTrackIndex < 8) {
+            const childTrack = childTrackBank.getItemAt(childTrackIndex);
+            const controls = childTrackControls[childTrackIndex];
+            // Only light up if child track exists and has parameters
+            if (childTrack && childTrack.exists().get() && 
+                controls && controls.getParameter(i).exists().get()) {
+                color = LED_COLOR.YELLOW_FULL;
+            }
+        }
         sendLedUpdateKnob('M', i, color);
     }
 }
 
 function updateBottomKnobLeds() { // Bottom KNOBS (Selected Page 1-8)
-    if (DEBUG) host.println("Updating Bottom Knob LEDs...");
-    if (!remoteControlsSelected) return;
+    host.println("Updating Bottom Knob LEDs...");
+    if (!remoteControlsPageSelect) return;
      for (let i = 0; i < 8; i++) {
-        const paramExists = remoteControlsSelected.getParameter(i).exists().get();
+        const paramExists = remoteControlsPageSelect.getParameter(i).exists().get();
         // Use AMBER_FULL (bright amber)
         const color = paramExists ? LED_COLOR.AMBER_FULL : LED_COLOR.OFF;
          // Send update via Sysex using KNOB helper
@@ -709,10 +809,10 @@ function updateBottomKnobLeds() { // Bottom KNOBS (Selected Page 1-8)
 }
 
 function updateAllLeds() {
-    if (DEBUG) host.println("Updating All LEDs...");
+    host.println("Updating All LEDs...");
     // Buttons
-    updateTopRow_Mode();        // Top row (Page/Track)
-    updateBottomRow_MuteSolo(); // Bottom row (Mute/Solo)
+    updateTopRow_PageSelect();  // Top row (Page Select only)
+    updateBottomRow_Mode();     // Bottom row (Mute/Solo/Track)
     updateModeButtonLeds();     // Mute/Solo/RecArm side buttons
     updateUtilityButtonLeds();  // Device, Track/Send Select buttons
     // Knobs
@@ -740,7 +840,7 @@ function sendLedUpdate(row, index, colorVelocity) {
     if (!midiOut) return;
     const sysexIndex = getSysexIndexForButton(row, index); // Use Button helper
     if (sysexIndex === -1) {
-        if (DEBUG) host.println(`WARN: Could not get Button Sysex index for row ${row}, index ${index}`);
+        host.println(`WARN: Could not get Button Sysex index for row ${row}, index ${index}`);
         return;
     }
     sendSysexLedCommand(sysexIndex, colorVelocity);
@@ -751,7 +851,7 @@ function sendLedUpdateSideButton(buttonType, colorVelocity) {
     if (!midiOut) return;
     const sysexIndex = getSysexIndexForSideButton(buttonType); // Use Side Button helper
      if (sysexIndex === -1) {
-        if (DEBUG) host.println(`WARN: Could not get Side Button Sysex index for type ${buttonType}`);
+        host.println(`WARN: Could not get Side Button Sysex index for type ${buttonType}`);
         return;
     }
     sendSysexLedCommand(sysexIndex, colorVelocity);
@@ -762,7 +862,7 @@ function sendLedUpdateKnob(row, index, colorVelocity) {
     if (!midiOut) return;
     const sysexIndex = getSysexIndexForKnob(row, index); // Use Knob helper
      if (sysexIndex === -1) {
-        if (DEBUG) host.println(`WARN: Could not get Knob Sysex index for row ${row}, index ${index}`);
+        host.println(`WARN: Could not get Knob Sysex index for row ${row}, index ${index}`);
         return;
     }
     sendSysexLedCommand(sysexIndex, colorVelocity);
@@ -788,46 +888,46 @@ function sendSysexLedCommand(sysexLedIndex, colorVelocity) {
     midiOut.sendSysex(hexString);
 }
 
-// NEW function to update Mode button LEDs
+// Update mode button LEDs function
 function updateModeButtonLeds() {
-    if (DEBUG) host.println(`Updating Mode Button LEDs, Bottom: ${currentBottomRowMode}, Top: ${currentTopRowMode}`);
+    host.println(`Updating Mode Button LEDs, Mode: ${currentBottomRowMode}`);
     // Mute Button
     const muteColor = (currentBottomRowMode === MODE_MUTE) ? LED_COLOR.AMBER_FULL : LED_COLOR.OFF;
     sendLedUpdateSideButton(MODE_MUTE, muteColor);
     // Solo Button
     const soloColor = (currentBottomRowMode === MODE_SOLO) ? LED_COLOR.AMBER_FULL : LED_COLOR.OFF;
     sendLedUpdateSideButton(MODE_SOLO, soloColor);
-    // RecArm Button (Indicates if Top Row is in Track Select mode)
-    const recArmColor = (currentTopRowMode === MODE_TRACK) ? LED_COLOR.AMBER_FULL : LED_COLOR.OFF;
-    // We need to use the Note for RecArm button to send its state
-    // Can reuse sendLedUpdateSideButton if we adjust the helper or add a mapping
-    // Let's adjust the helper for now
-    sendLedUpdateSideButton('REC_ARM', recArmColor); // Use a string identifier
+    // RecArm Button (Now indicates Track Select mode)
+    const recArmColor = (currentBottomRowMode === MODE_TRACK) ? LED_COLOR.AMBER_FULL : LED_COLOR.OFF;
+    sendLedUpdateSideButton('REC_ARM', recArmColor);
 }
 
 // NEW LED function for Utility Buttons (Device, Arrows)
 function updateUtilityButtonLeds() {
-    if (DEBUG) host.println("Updating Utility Button LEDs... (Targeting Page 10)");
+    host.println("Updating Utility Button LEDs...");
     if (!remoteControlsPage10) return; // Check Page 10
 
     for (const buttonId in UTILITY_BUTTON_MAP) {
-         const mapping = UTILITY_BUTTON_MAP[buttonId];
-         const parameter = remoteControlsPage10.getParameter(mapping.paramIndex);
-         let color = LED_COLOR.OFF;
-         const paramExists = parameter.exists().get(); // Check existence
+        const mapping = UTILITY_BUTTON_MAP[buttonId];
+        let color = LED_COLOR.OFF;
 
-         if (paramExists) {
-             const value = parameter.value().get();
-             // Red Dim/Full based on toggle state
-             color = value > 0 ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
-         }
+        // Special handling for Device button - now indicates group expansion
+        if (buttonId === 'DEVICE') {
+            if (fixedTrack.isGroup().get()) {
+                // Red Full when expanded, Red Low when collapsed
+                color = fixedTrack.isGroupExpanded().get() ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
+            }
+        } else {
+            // Original handling for other utility buttons
+            const parameter = remoteControlsPage10.getParameter(mapping.paramIndex);
+            const paramExists = parameter.exists().get();
+            if (paramExists) {
+                const value = parameter.value().get();
+                color = value > 0 ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
+            }
+        }
 
-         // Specific Debug for Device Button
-         if (buttonId === 'DEVICE') {
-             if (DEBUG) host.println(`  -> DEVICE LED Check: ParamExists=${paramExists}, Color=${color}`);
-         }
-
-         sendLedUpdateUtilityButton(buttonId, color);
+        sendLedUpdateUtilityButton(buttonId, color);
     }
 }
 
@@ -836,8 +936,40 @@ function sendLedUpdateUtilityButton(buttonId, colorVelocity) {
      if (!midiOut) return;
     const sysexIndex = getSysexIndexForUtilityButton(buttonId);
      if (sysexIndex === -1) {
-        if (DEBUG) host.println(`WARN: Could not get Utility Button Sysex index for ID ${buttonId}`);
+        host.println(`WARN: Could not get Utility Button Sysex index for ID ${buttonId}`);
         return;
     }
     sendSysexLedCommand(sysexIndex, colorVelocity);
+}
+
+function initializeRemoteControlObservers() {
+    // Initialize observers for Fixed Remote Controls Page 11 (Middle Knobs)
+    for (var i = 0; i < 8; i++) {
+        var param = remoteControlsPageSelect.getRemoteControls().getRemoteControlInSlot(i);
+        if (param) {
+            param.exists().markInterested();
+            param.value().markInterested();
+            param.name().markInterested();
+        }
+    }
+
+    // Initialize observers for Fixed Remote Controls Page 10 (Utility Buttons)
+    for (var i = 0; i < 8; i++) {
+        var param = remoteControlsPage10.getRemoteControls().getRemoteControlInSlot(i);
+        if (param) {
+            param.exists().markInterested();
+            param.value().markInterested();
+            param.name().markInterested();
+        }
+    }
+
+    // Initialize observers for Selectable Remote Controls Page (Bottom Knobs)
+    for (var i = 0; i < 8; i++) {
+        var param = remoteControlsPageSelect.getRemoteControls().getRemoteControlInSlot(i);
+        if (param) {
+            param.exists().markInterested();
+            param.value().markInterested();
+            param.name().markInterested();
+        }
+    }
 }
