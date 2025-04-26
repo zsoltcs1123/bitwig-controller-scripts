@@ -27,9 +27,12 @@ let childSliderPage;    // Sliders page for the child track (fixed index)
 let childDrumPadBank;   // Drum pads for the selected child track
 let childButtonsPage;   // Buttons page for the child track (fixed index 10)
 
+let groupTrackRemoteControls; // Remote controls page for the GROUP TRACK itself
+
 let targetGroupTrackIndex = 0; // Index of the main track bank scroll position
 let currentTrackIndex = 0; // Index of the child trackBank scroll position (0-7)
-let currentPage = 0;       // The remote control page index (0-8) for KNOBS
+let currentPage = 0;       // The remote control page index (0-11) for KNOBS (or track remotes if active)
+let isControllingGroupTrackRemotes = false; // NEW state: true if REW mode is active (controlling track remotes)
 let midiOutPort;
 let transport;
 let isPlaying = false;
@@ -118,9 +121,14 @@ function init() {
 
     // Add observer for group knob page changes ONCE
     groupRemoteControls.selectedPageIndex().addValueObserver((page) => {
-        if (cursorDevice === groupCursorDevice) {
-            host.println("Selected Group Knob Page Index: " + page);
-            currentPage = page; // Update global currentPage based on group context
+        if (cursorDevice === groupCursorDevice) { // Update whenever the group device page changes
+            // We update our internal currentPage based on context (REW mode vs S/FF mode)
+            // but we observe the actual device page index here.
+            host.println("Observed Group Device Knob Page Index: " + page);
+            // Only update our internal currentPage if NOT in the special REW mode
+            if (!isControllingGroupTrackRemotes) {
+                currentPage = page; // Update global currentPage based on group device context
+            }
             updatePageLeds();
         }
     });
@@ -146,6 +154,26 @@ function init() {
     groupButtonsPage.getParameter(0).value().addValueObserver((value) => {
         if (cursorDevice === groupCursorDevice) {
             sendMidi(0xB0, CC.REC, value > 0 ? 127 : 0);
+        }
+    });
+
+    // --- Create and Initialize Group Track Remote Controls --- // CORRECTED APPROACH
+    groupTrackRemoteControls = groupTrack.createCursorRemoteControlsPage(8); // Create remotes directly from track
+    groupTrackRemoteControls.selectedPageIndex().markInterested();
+    groupTrackRemoteControls.selectedPageIndex().set(0); // Always use page 0 for track remotes
+    for (let i = 0; i < 8; i++) { // Mark parameter existence for LEDs/logic
+        groupTrackRemoteControls.getParameter(i).exists().markInterested();
+    }
+    // Add observer mainly for debugging/correction
+    groupTrackRemoteControls.selectedPageIndex().addValueObserver((page) => {
+        if (isControllingGroupTrackRemotes) { // Only log/correct if we are in track control mode
+            host.println("Observed Group Track Remote Page Index: " + page);
+            if (page !== 0) {
+                 host.println("Warning: Group Track Remote Page changed unexpectedly to " + page + ". Forcing back to 0.");
+                 groupTrackRemoteControls.selectedPageIndex().set(0); // Re-force page 0
+                 // Don't update currentPage here, it should stay 0 in this mode
+            }
+            // updatePageLeds(); // No, page doesn't change visually for track remotes mode
         }
     });
 
@@ -257,7 +285,8 @@ function selectChildTrack(index) {
     if (index >= 0 && index < TRACK_BANK_SIZE) {
         currentTrackIndex = index;
         trackBank.scrollPosition().set(index); // Scrolls the child bank window
-        
+        isControllingGroupTrackRemotes = false; // Deactivate track remote mode when selecting child
+
         // The child* variables already point to the API objects linked to fixedTrack.
         // We just need to set our global state variables to use them.
         cursorDevice = childCursorDevice;
@@ -282,29 +311,43 @@ function selectChildTrack(index) {
 }
 
 function switchToGroupMode(targetPage) {
-    if (!groupCursorDevice || !groupTrack) {
-        host.println("Cannot switch to group mode: Controls not ready (group track might be missing?).");
+    // Check necessary objects exist, including the new groupTrackRemoteControls
+    if (!groupCursorDevice || !groupTrack || !groupRemoteControls || !groupTrackRemoteControls) {
+        host.println("Cannot switch to group mode: Controls not ready (group track/device or remotes might be missing?).");
         // Clear global state variables
         cursorDevice = null;
         remoteControls = null;
         drumPadBank = null;
         currentPage = 0;
+        isControllingGroupTrackRemotes = false; // Reset state
         updatePageLeds();
         return;
     }
-    // Set global state variables to use the group objects
+
+    // Always set device and drum bank to the group's device for sliders/mutes/etc.
+    // even when knobs control the track remotes.
     cursorDevice = groupCursorDevice;
-    remoteControls = groupRemoteControls;
     drumPadBank = groupDrumPadBank;
-    
-    currentPage = targetPage;
-    if (remoteControls) remoteControls.selectedPageIndex().set(targetPage); // Tell Bitwig to change page
-    
-    // Ensure slider pages stay on page 9
+
+    if (targetPage === 0) {
+         // Special case: REW pressed, control TRACK remotes page 0
+        remoteControls = groupTrackRemoteControls;  // Point knobs to TRACK remotes
+        isControllingGroupTrackRemotes = true;      // Set state flag
+        currentPage = 0;                            // Force page 0 for track remotes context
+        if (remoteControls) remoteControls.selectedPageIndex().set(0); // Tell Bitwig TRACK remotes to go to page 0 (should already be)
+        host.showPopupNotification("Selected Group Track Remotes: " + groupTrack.name().get());
+
+    } else {
+        // Normal case: Control DEVICE remotes (e.g., page 1-8 via S buttons, page 11 via FF)
+        remoteControls = groupRemoteControls;       // Point knobs to DEVICE remotes
+        isControllingGroupTrackRemotes = false;     // Clear state flag
+        currentPage = targetPage;                   // Set page (e.g., 11 for FF, 1-8 for S)
+        if (remoteControls) remoteControls.selectedPageIndex().set(targetPage); // Tell Bitwig
+        host.showPopupNotification("Selected Group Device: " + groupTrack.name().get() + " (Page " + currentPage + ")");
+    }
+
+    // Ensure device slider pages stay on page 9 (Applies to groupSliderPage)
     ensureSliderPagesOnCorrectPage();
-    
-    // groupTrack should point to the current group track due to mainTrackBank scrolling
-    host.showPopupNotification("Selected Group: " + groupTrack.name().get() + " (Page " + currentPage + ")");
     updatePageLeds();
 }
 
@@ -312,7 +355,9 @@ function switchToGroupMode(targetPage) {
 function updatePageLeds() {
     // S buttons (Knob page select)
     for (let i = 0; i < 8; i++) {
-        sendMidi(0xB0, CC.S1 + i, (currentPage === i + 1) ? 127 : 0);
+        // Light up only if NOT controlling track remotes AND on the corresponding device page (1-8)
+        let isSelectedDevicePage = !isControllingGroupTrackRemotes && (currentPage === i + 1);
+        sendMidi(0xB0, CC.S1 + i, isSelectedDevicePage ? 127 : 0);
     }
     
     // M buttons (Drum Pad Mute)
@@ -348,10 +393,10 @@ function updatePageLeds() {
     }
     
     // Group mode / Page LEDs (REW/FF)
-    // Light up REW if in group mode on page 0
-    sendMidi(0xB0, CC.REW, (cursorDevice === groupCursorDevice && currentPage === 0) ? 127 : 0);
-    // Light up FF if in group mode on page 11
-    sendMidi(0xB0, CC.FF, (cursorDevice === groupCursorDevice && currentPage === 11) ? 127 : 0);
+    // Light up REW if controlling the group track's remotes
+    sendMidi(0xB0, CC.REW, isControllingGroupTrackRemotes ? 127 : 0);
+    // Light up FF if controlling the group *device* on page 11
+    sendMidi(0xB0, CC.FF, (cursorDevice === groupCursorDevice && currentPage === 11 && !isControllingGroupTrackRemotes) ? 127 : 0);
 
     // Track Navigation LEDs (TRACK < / >)
     if (mainTrackBank) {
@@ -382,26 +427,38 @@ function onMidi(status, data1, data2) {
         
         // --- Handle REW/FF Buttons (Group Mode Page 0/11 or Toggle) ---
         if (data1 === CC.REW && data2 > 0) {
-            if (!groupCursorDevice) return; 
-            if (cursorDevice === groupCursorDevice && currentPage === 0) {
-                if (childCursorDevice) {
+            if (!groupTrack) return; // Need group track to exist
+            if (isControllingGroupTrackRemotes) { // If already controlling track remotes...
+                // ...try switching to the last selected child track
+                if (childCursorDevice && fixedTrack.exists().get()) { // Check if child exists
                     selectChildTrack(currentTrackIndex);
+                } else {
+                    // No child available, maybe switch to group DEVICE page 0?
+                    // For now, let's stay in track remote mode or do nothing if toggled again?
+                    // Let's just do nothing if no child track exists to switch to.
+                    host.println("REW pressed again (Track Remote Mode), but no child track available.");
                 }
             } else {
+                // Switch to group track remote mode (page 0)
                 switchToGroupMode(0);
             }
             return;
         }
         if (data1 === CC.FF && data2 > 0) {
-            if (!groupCursorDevice) return; 
-            if (cursorDevice === groupCursorDevice && currentPage === 11) {
-                // Currently in group mode page 11, try switching to last selected child
-                 if (childCursorDevice) {
+            if (!groupCursorDevice) return;
+            // Check if currently controlling the group *device* on page 11
+            if (cursorDevice === groupCursorDevice && currentPage === 11 && !isControllingGroupTrackRemotes) {
+                 // If yes, try switching to last selected child
+                 if (childCursorDevice && fixedTrack.exists().get()) { // Check if child exists
                     selectChildTrack(currentTrackIndex);
+                } else {
+                    // No child available, stay on group device page 11? Or do nothing?
+                    // Let's do nothing if no child track exists to switch to.
+                    host.println("FF pressed again (Group Device Page 11), but no child track available.");
                 }
             } else {
-                // Switch to group mode, page 11
-                switchToGroupMode(11);
+                // Otherwise, switch to group *device* mode, page 11
+                switchToGroupMode(11); // This will set isControllingGroupTrackRemotes = false
             }
             return;
         }
@@ -443,24 +500,90 @@ function onMidi(status, data1, data2) {
         if (data1 >= CC.KNOB1 && data1 <= CC.KNOB8) {
             if (!remoteControls) return; // Check if valid
             let index = data1 - CC.KNOB1;
-            remoteControls.getParameter(index).set(data2, 128);
+
+            // Target depends on the mode (Track Remotes vs Device Remotes)
+            let targetParameter;
+            if (isControllingGroupTrackRemotes) {
+                // Ensure groupTrackRemoteControls is valid before using
+                 if (!groupTrackRemoteControls) {
+                     host.println("Knob Error: groupTrackRemoteControls not available!");
+                     return;
+                 }
+                targetParameter = groupTrackRemoteControls.getParameter(index);
+                // host.println(`-> Knob ${index+1} to Group Track Remote Param ${index}`);
+            } else {
+                 // remoteControls should point to either groupRemoteControls or childRemoteControls here
+                 targetParameter = remoteControls.getParameter(index);
+                // host.println(`-> Knob ${index+1} to Device Remote Param ${index} on Page ${currentPage}`);
+            }
+
+            if (targetParameter) { // Check if parameter object exists
+                 targetParameter.set(data2, 128);
+             } else {
+                 host.println(`Knob Error: Target parameter ${index} not found for current context.`);
+             }
             return;
         }
 
         // --- Page Selection (S Buttons - use currently active 'remoteControls') --- 
         if (data1 >= CC.S1 && data1 <= CC.S8) {
-            if (!remoteControls) return; // Check if valid
+            let targetDevice = cursorDevice; // Current device context (group or child)
+            let targetRemoteControls; // The remote controls object for the DEVICE
+
+            if (isControllingGroupTrackRemotes) {
+                 // If we were controlling the TRACK remotes (via REW),
+                 // S buttons should switch back to controlling the GROUP *DEVICE* remotes.
+                 targetDevice = groupCursorDevice;
+                 isControllingGroupTrackRemotes = false; // Exit track remote mode
+                 cursorDevice = groupCursorDevice;     // Update global state
+                 remoteControls = groupRemoteControls; // Update global state
+                 drumPadBank = groupDrumPadBank;       // Ensure drum bank is correct for group device
+                 host.println("S Button: Switched from Track Remotes to Group Device Remotes");
+                 // Set the targetRemoteControls *after* potentially switching context
+                 targetRemoteControls = groupRemoteControls;
+            } else if (cursorDevice === groupCursorDevice) {
+                 // Already controlling group device remotes
+                 targetRemoteControls = groupRemoteControls;
+            } else if (cursorDevice === childCursorDevice) {
+                 // Controlling child device remotes
+                 targetRemoteControls = childRemoteControls;
+            } else {
+                 host.println("S Button: No valid device context.");
+                 return; // No valid context
+            }
+
+
+            if (!targetRemoteControls) {
+                 host.println("S Button: Target Remote Controls object is invalid.");
+                 return; // Check if valid
+            }
+
             if (data2 > 0) { // Button pressed
                  let pageIndex = data1 - CC.S1 + 1; // S1 = Page 1, S8 = Page 8
+
+                 // Toggle logic: If already on this page (and not in track remote mode), go to page 0.
+                 // Note: isControllingGroupTrackRemotes is already false here due to the logic above.
                  if (currentPage === pageIndex) {
-                    // Toggle back to page 0
+                    // Toggle back to page 0 of the *device*
                     currentPage = 0;
                  } else {
-                    // Switch to page S[index+1]
+                    // Switch to page S[index+1] of the *device*
                     currentPage = pageIndex;
                  }
-                 remoteControls.selectedPageIndex().set(currentPage);
-                 updatePageLeds(); // Update LEDs based on new currentPage
+                 targetRemoteControls.selectedPageIndex().set(currentPage); // Set page on the DEVICE remote controls
+
+                 // Display notification about device page change
+                 let deviceName = "";
+                 if (targetDevice === groupCursorDevice && groupTrack) {
+                     deviceName = groupTrack.name().get();
+                     host.showPopupNotification("Selected Group Device: " + deviceName + " (Page " + currentPage + ")");
+                 } else if (targetDevice === childCursorDevice && fixedTrack) {
+                     deviceName = fixedTrack.name().get();
+                     host.showPopupNotification("Selected Child: " + deviceName + " (Page " + currentPage + ")");
+                 }
+
+                 // Update LEDs based on new currentPage and ensuring isControllingGroupTrackRemotes is false
+                 updatePageLeds();
             }
             return;
         }
