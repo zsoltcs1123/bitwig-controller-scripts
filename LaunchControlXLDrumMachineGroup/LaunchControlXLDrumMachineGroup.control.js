@@ -90,6 +90,8 @@ let currentSelectedGroupIndex = 0; // Index of the GROUP track the bank is scrol
 let childDevices = []; // Devices for each child track (index 1-8)
 let childDeviceControls = []; // DEFAULT remote control pages (Device Pages) for each child track's device (index 1-8)
 let childPresetControls = []; // PRESET remote control pages for each child track's device (index 1-8)
+let childGroupControls = []; // NEW: Remote controls for child tracks that are groups (index 1-8)
+let childTrackControls = []; // NEW: Track remote controls for all child tracks (index 1-8)
 
 // NEW Helper to get the Sysex Index for a button LED
 // Top Row Buttons = 0x18 - 0x1F (24-31)
@@ -226,13 +228,29 @@ function init() {
     childDevices = []; // Clear/init arrays
     childDeviceControls = [];
     childPresetControls = [];
+    childGroupControls = []; 
+    childTrackControls = []; // NEW: Initialize track controls array
     for (let i = 1; i <= 8; i++) {
         const childTrack = childTrackBank.getItemAt(i);
         childTrack.name().markInterested();
         childTrack.exists().markInterested();
+        childTrack.isGroup().markInterested();
 
+        // NEW: Create track remote controls page for all child tracks
+        const trackControls = childTrack.createCursorRemoteControlsPage("ChildTrackControls" + i, 8, null);
+        trackControls.selectedPageIndex().markInterested();
+        trackControls.selectedPageIndex().set(0);
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            trackControls.getParameter(paramIndex).exists().markInterested();
+        }
+        childTrackControls[i] = trackControls;
+
+        // Keep existing setup for backward compatibility, though we won't use it
         const deviceBank = childTrack.createDeviceBank(1);
-        deviceBank.setDeviceMatcher(instrumentMatcher);
+        const instrumentMatcher = host.createInstrumentMatcher();
+        const audioEffectMatcher = host.createAudioEffectMatcher();
+        const deviceMatcher = host.createOrDeviceMatcher(instrumentMatcher, audioEffectMatcher);
+        deviceBank.setDeviceMatcher(deviceMatcher);
         const device = deviceBank.getDevice(0);
         device.name().markInterested();
         device.exists().markInterested();
@@ -250,9 +268,9 @@ function init() {
             perfControls.getParameter(paramIndex).exists().markInterested();
         }
 
-        childDevices[i] = device; // Store device proxy
-        childDeviceControls[i] = deviceControls; // Store device page cursor
-        childPresetControls[i] = perfControls; // Store perf page cursor
+        childDevices[i] = device;
+        childDeviceControls[i] = deviceControls;
+        childPresetControls[i] = perfControls;
     }
 
     // --- Add Observers (MUST NOT call markInterested) ---
@@ -354,29 +372,16 @@ function init() {
     }
 
     // Child Track Observers (Existence for Middle Knobs)
-    // Note: We observe the items *within* the bank (childTrackBank.getItemAt(i)).
-    // When the bank's focus changes (implicitly via selectedGroupTrack changing), these observers
-    // should report the state of the *new* tracks/devices/parameters at those indices.
     for (let i = 1; i <= 8; i++) {
         const childTrack = childTrackBank.getItemAt(i);
-        const device = childDevices[i]; // Use the stored device proxy
-        const deviceControls = childDeviceControls[i];
-        const perfControls = childPresetControls[i];
+        const trackControls = childTrackControls[i];
 
         childTrack.exists().addValueObserver((exists) => {
             updateMiddleKnobLeds();
         });
-        device.exists().addValueObserver((exists) => {
-            updateMiddleKnobLeds();
-        });
 
         for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
-            deviceControls.getParameter(paramIndex).exists().addValueObserver((exists) => {
-                updateMiddleKnobLeds();
-            });
-            perfControls.getParameter(paramIndex).exists().addValueObserver((exists) => {
-                updateMiddleKnobLeds();
-            });
+            trackControls.getParameter(paramIndex).exists().markInterested();
         }
     }
 
@@ -470,28 +475,12 @@ function handleCC(cc, value) {
     else if (cc >= CC.KNOB_M1 && cc <= CC.KNOB_M8) {
         const childTrackIndex = currentSelectedPage; // Page 1-8 maps to Child Index 1-8
         if (childTrackIndex >= 1 && childTrackIndex <= 8) {
-            const presetControls = childPresetControls[childTrackIndex];
-            const deviceControls = childDeviceControls[childTrackIndex];
-            let targetControls = null;
-            let targetType = "None";
-
-            // Prioritize PRESET controls if its page 0 parameter exists
-            if (presetControls && presetControls.getParameter(paramIndex).exists().get()) {
-                 targetControls = presetControls;
-                 targetType = "PRESET";
+            const childTrack = childTrackBank.getItemAt(childTrackIndex);
+            const trackControls = childTrackControls[childTrackIndex];
+            
+            if (trackControls && trackControls.getParameter(paramIndex).exists().get()) {
+                trackControls.getParameter(paramIndex).set(value, 128);
             }
-            // Fallback to DEVICE controls if its page 0 parameter exists
-            else if (deviceControls && deviceControls.getParameter(paramIndex).exists().get()) {
-                 targetControls = deviceControls;
-                 targetType = "DEVICE";
-            }
-
-            if (targetControls) {
-                 targetControls.getParameter(paramIndex).set(value, 128);
-            } else {
-            }
-        } else {
-             host.println(`  -> WARN: Middle Knob ${paramIndex + 1} (CC ${cc}) -> Invalid page ${currentSelectedPage} for child track control.`);
         }
     }
     // Bottom Knobs (FOLLOWS Selected Page 1-8 on Mixer Track)
@@ -759,16 +748,11 @@ function updateMiddleKnobLeds() { // Middle KNOBS (Child Tracks 1-8)
     for (let i = 0; i < 8; i++) { // Iterate through the 8 middle knobs (param index 0-7)
         let color = LED_COLOR.OFF;
         if (childTrackIndex >= 1 && childTrackIndex <= 8) {
-            const presetControls = childPresetControls[childTrackIndex];
-            const deviceControls = childDeviceControls[childTrackIndex];
-
-            // Check existence of the parameter 'i' on either page 0 type
-            const presetParamExists = presetControls && presetControls.getParameter(i).exists().get();
-            const deviceParamExists = deviceControls && deviceControls.getParameter(i).exists().get();
-
-            // Light up if the parameter exists on *either* the Perf page 0 or the Device page 0
-            if (presetParamExists || deviceParamExists) {
-                color = LED_COLOR.YELLOW_FULL; // Use Yellow for child track parameters
+            const childTrack = childTrackBank.getItemAt(childTrackIndex);
+            const trackControls = childTrackControls[childTrackIndex];
+            
+            if (trackControls && trackControls.getParameter(i).exists().get()) {
+                color = LED_COLOR.YELLOW_FULL;
             }
         }
         // Send update for the i-th middle knob LED
