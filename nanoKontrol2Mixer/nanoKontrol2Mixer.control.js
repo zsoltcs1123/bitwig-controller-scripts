@@ -76,6 +76,29 @@ function init()
 	mutesPage.selectedPageIndex().markInterested();
 	mutesPage.selectedPageIndex().set(2); 
 
+	// Add observers to ensure pages stay fixed and debug page changes
+	fadersPage.selectedPageIndex().addValueObserver((page) => {
+		println("Faders page changed to: " + page);
+		if (page !== 1) {
+			println("Correcting faders page back to 1");
+			fadersPage.selectedPageIndex().set(1);
+		}
+	});
+
+	mutesPage.selectedPageIndex().addValueObserver((page) => {
+		println("Mutes page changed to: " + page);
+		if (page !== 2) {
+			println("Correcting mutes page back to 2");
+			mutesPage.selectedPageIndex().set(2);
+		}
+	});
+
+	// Debug initial page states
+	println("Initial page states:");
+	println("Project Perform page: " + projectPerformPage.selectedPageIndex().get());
+	println("Faders page: " + fadersPage.selectedPageIndex().get());
+	println("Mutes page: " + mutesPage.selectedPageIndex().get());
+
 	println("Attempting to access Project Remote pages by index: 0 (Perform), 1 (Faders), 2 (Mutes)");
 
 	// Initialize active perform page to the project page
@@ -158,6 +181,7 @@ function init()
 			}
 		});
 
+	
 		// Mark parameters as interested for LED feedback
 		for (let j = 0; j < 8; j++) {
 			mixerButtonPages[i].getParameter(j).markInterested();
