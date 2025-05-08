@@ -79,8 +79,9 @@ let cursorDevice; // Device on mixerTrack
 let drumPadBank; // Drum pads on mixerTrack's device
 let remoteControlsPage0;  // Top Knobs - FIXED page 0 (on mixerTrack device)
 let remoteControlsPage9;  // Sliders - FIXED page 9 (on mixerTrack device)
-let remoteControlsPage10; // Utility Buttons - FIXED page 10 (on mixerTrack device)
+let remoteControlsPage10; // Utility Buttons - FIXED page 10 (on mixerTrack device) - DEPRECATED
 let remoteControlsPageSelect; // Bottom Knobs - FOLLOWS SELECTION (pages 1-8, on mixerTrack device)
+let groupUtilityControls; // NEW: Utility Buttons - FIXED page 1 (on group track)
 let currentSelectedPage = 1; // Default to page 1 (index 1)
 const PAGE_SELECT_OFFSET = 1; // Buttons select pages 1-8
 let currentBottomRowMode = MODE_MUTE; // Mode for bottom row buttons (Mute/Solo/Track)
@@ -196,30 +197,30 @@ function init() {
         remoteControlsPage0.getParameter(i).exists().markInterested();
     }
 
+    // NEW: Utility Buttons (Page 1 on Group Track)
+    groupUtilityControls = selectedGroupTrack.createCursorRemoteControlsPage("FixedPage1_GroupUtility", 8, null);
+    groupUtilityControls.selectedPageIndex().markInterested();
+    groupUtilityControls.selectedPageIndex().set(1);
+    for (let i = 0; i < 8; i++) {
+        const param = groupUtilityControls.getParameter(i);
+        param.exists().markInterested();
+        param.value().markInterested(); // Value needed for LED updates
+    }
+
     // Sliders (Page 9 on Mixer Track Device)
     remoteControlsPage9 = cursorDevice.createCursorRemoteControlsPage("FixedPage9_MixerSliders", 8, null);
     remoteControlsPage9.selectedPageIndex().markInterested();
     remoteControlsPage9.selectedPageIndex().set(9);
     for (let i = 0; i < 8; i++) {
-        remoteControlsPage9.getParameter(i).exists().markInterested(); // Need exists for CC handler logic? Let's assume not.
-    }
-
-    // Utility Buttons (Page 10 on Mixer Track Device)
-    remoteControlsPage10 = cursorDevice.createCursorRemoteControlsPage("FixedPage10_MixerUtility", 8, null);
-    remoteControlsPage10.selectedPageIndex().markInterested();
-    remoteControlsPage10.selectedPageIndex().set(10);
-    for (let i = 0; i < 8; i++) {
-        const param = remoteControlsPage10.getParameter(i);
-        param.exists().markInterested();
-        param.value().markInterested(); // Value needed for LED updates
+        remoteControlsPage9.getParameter(i).exists().markInterested();
     }
 
     // Bottom Knobs (Selectable Page 1-8 (or 0) on Mixer Track Device)
-    remoteControlsPageSelect = cursorDevice.createCursorRemoteControlsPage(8); // Follows user selection
+    remoteControlsPageSelect = cursorDevice.createCursorRemoteControlsPage(8);
     remoteControlsPageSelect.selectedPageIndex().markInterested();
     remoteControlsPageSelect.pageNames().markInterested();
-    remoteControlsPageSelect.pageCount().markInterested(); // Potentially useful
-    remoteControlsPageSelect.selectedPageIndex().set(currentSelectedPage); // Set initial page
+    remoteControlsPageSelect.pageCount().markInterested();
+    remoteControlsPageSelect.selectedPageIndex().set(currentSelectedPage);
     for (let i = 0; i < 8; i++) {
         remoteControlsPageSelect.getParameter(i).exists().markInterested();
     }
@@ -345,15 +346,15 @@ function init() {
         });
     }
 
-    // Fixed Page 10 (Mixer Utility) - Param Value/Existence
+    // Fixed Page 1 (Group Utility) - Param Value/Existence
     for (let i = 0; i < 8; i++) {
-         const param = remoteControlsPage10.getParameter(i);
-         param.exists().addValueObserver(exists => {
-             updateUtilityButtonLeds();
-         });
-         param.value().addValueObserver(value => {
-             updateUtilityButtonLeds();
-         });
+        const param = groupUtilityControls.getParameter(i);
+        param.exists().addValueObserver(exists => {
+            updateUtilityButtonLeds();
+        });
+        param.value().addValueObserver(value => {
+            updateUtilityButtonLeds();
+        });
     }
 
     // Selectable Page (Mixer Bottom Knobs) - Page Index & Param Existence
@@ -392,16 +393,16 @@ function init() {
             remoteControlsPage0.selectedPageIndex().set(0);
         }
     });
+    groupUtilityControls.selectedPageIndex().addValueObserver((index) => {
+        if (index !== 1) {
+            host.println(`WARN: Fixed Page 1 (Group Utility) index (${index}) changed? Forcing back.`);
+            groupUtilityControls.selectedPageIndex().set(1);
+        }
+    });
     remoteControlsPage9.selectedPageIndex().addValueObserver((index) => {
         if (index !== 9) {
             host.println(`WARN: Fixed Page 9 (Sliders) index (${index}) changed? Forcing back.`);
             remoteControlsPage9.selectedPageIndex().set(9);
-        }
-    });
-    remoteControlsPage10.selectedPageIndex().addValueObserver((index) => {
-        if (index !== 10) {
-            host.println(`WARN: Fixed Page 10 (Utility) index (${index}) changed? Forcing back.`);
-            remoteControlsPage10.selectedPageIndex().set(10);
         }
     });
 
@@ -440,7 +441,7 @@ function onMidi(status, data1, data2) {
 // --- MIDI Handlers ---
 function handleCC(cc, value) {
     // Ensure API objects related to the mixer track are valid
-    if (!mixerTrack || !mixerTrack.exists().get() || !cursorDevice || !cursorDevice.exists().get() || !remoteControlsPage0 || !remoteControlsPage9 || !remoteControlsPage10 || !remoteControlsPageSelect) {
+    if (!mixerTrack || !mixerTrack.exists().get() || !cursorDevice || !cursorDevice.exists().get() || !remoteControlsPage0 || !remoteControlsPage9 || !groupUtilityControls || !remoteControlsPageSelect) {
         host.println(`WARN: Mixer track or its device/controls not ready in handleCC. CC ${cc} ignored.`);
         return;
     }
@@ -450,12 +451,12 @@ function handleCC(cc, value) {
         for (const buttonId in UTILITY_BUTTON_MAP) {
             const mapping = UTILITY_BUTTON_MAP[buttonId];
             if (mapping.cc === cc) {
-                    const parameter = remoteControlsPage10.getParameter(mapping.paramIndex);
-                     if (parameter.exists().get()) {
-                        const currentValue = parameter.value().get();
-                        parameter.value().set(currentValue === 0 ? 127 : 0, 128);
-                     } else {
-                         host.println(`     -> WARN: Param ${mapping.paramIndex} does NOT exist on Page 10 for Utility CC ${cc}.`);
+                const parameter = groupUtilityControls.getParameter(mapping.paramIndex);
+                if (parameter.exists().get()) {
+                    const currentValue = parameter.value().get();
+                    parameter.value().set(currentValue === 0 ? 127 : 0, 128);
+                } else {
+                    host.println(`     -> WARN: Param ${mapping.paramIndex} does NOT exist on Group Page 1 for Utility CC ${cc}.`);
                 }
                 return; // Consume CC
             }
@@ -750,7 +751,7 @@ function updateMiddleKnobLeds() { // Middle KNOBS (Child Tracks 1-8)
         if (childTrackIndex >= 1 && childTrackIndex <= 8) {
             const childTrack = childTrackBank.getItemAt(childTrackIndex);
             const trackControls = childTrackControls[childTrackIndex];
-            
+
             if (trackControls && trackControls.getParameter(i).exists().get()) {
                 color = LED_COLOR.YELLOW_FULL;
             }
@@ -865,10 +866,10 @@ function updateModeButtonLeds() {
 
 // NEW LED function for Utility Buttons (Device, Arrows)
 function updateUtilityButtonLeds() {
-    // Check mixer track page 10 for most buttons
-    const canUseUtilityPage = mixerTrack && mixerTrack.exists().get() && remoteControlsPage10;
+    // Check group track page 1 for utility buttons
+    const canUseUtilityPage = selectedGroupTrack && groupUtilityControls;
     // Check selected group track for device button
-    const canUseGroup = selectedGroupTrack; // selectedGroupTrack might be null initially or if track doesn't exist
+    const canUseGroup = selectedGroupTrack;
 
     for (const buttonId in UTILITY_BUTTON_MAP) {
         const mapping = UTILITY_BUTTON_MAP[buttonId];
@@ -880,14 +881,14 @@ function updateUtilityButtonLeds() {
                 color = selectedGroupTrack.isGroupExpanded().get() ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
             }
         }
-        // Handling for other utility buttons (Arrows) based on Mixer Track Page 10
+        // Handling for other utility buttons (Arrows) based on Group Track Page 1
         else {
             if (canUseUtilityPage) {
-            const parameter = remoteControlsPage10.getParameter(mapping.paramIndex);
-            const paramExists = parameter.exists().get();
-            if (paramExists) {
-                const value = parameter.value().get();
-                color = value > 0 ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
+                const parameter = groupUtilityControls.getParameter(mapping.paramIndex);
+                const paramExists = parameter.exists().get();
+                if (paramExists) {
+                    const value = parameter.value().get();
+                    color = value > 0 ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
                 }
             }
         }
