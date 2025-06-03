@@ -1,0 +1,11 @@
+{
+    "name": "LaunchControlXL SubMixer",
+    "vendor": "Novation",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Novation LaunchControlXL simplified submixer script",
+    "category": "Controller",
+    "hardware_vendor": "Novation",
+    "hardware_model": "LaunchControlXL",
+    "main": "LaunchControlXLSubMixer.control.js"
+} 

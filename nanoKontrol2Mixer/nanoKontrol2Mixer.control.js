@@ -15,7 +15,7 @@ const CC = {
 	// Add other CCs like transport if needed later
 };
 
-const SLIDER_PAGE_INDEX = 9;  // Fixed page index for faders
+const SLIDER_PAGE_INDEX = 9;  // Fixed page index for faders 
 const BUTTONS_PAGE_INDEX = 11; // Fixed page index for M buttons
 const FF_PAGE_INDEX = 3;      // Page to use when FF is active
 
