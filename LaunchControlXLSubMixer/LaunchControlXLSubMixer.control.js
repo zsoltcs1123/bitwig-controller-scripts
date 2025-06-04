@@ -54,7 +54,7 @@ const LED_COLOR = {
 // --- Globals ---
 let midiIn, midiOut;
 let trackBank, currentTrack, childTrackBank, mixerTrack, cursorDevice;
-let remoteControlsPage0, remoteControlsPage1, remoteControlsPage9;
+let remoteControlsPage0, mixerTrackPages, remoteControlsPage9;
 let currentSelectedChildIndex = 1;
 let childTrackControls = [];
 let childTrackPage1Controls = [];
@@ -99,20 +99,36 @@ function setupRemoteControls() {
     remoteControlsPage0 = mixerTrack.createCursorRemoteControlsPage("TopKnobs", 8, null);
     remoteControlsPage0.selectedPageIndex().set(0);
     
-    // Page 1 - Mixer track (Middle knobs)
-    remoteControlsPage1 = mixerTrack.createCursorRemoteControlsPage("MiddleKnobs", 8, null);
-    remoteControlsPage1.selectedPageIndex().set(1);
+    // Pages 1-8 - Mixer track (Middle knobs - corresponding to child tracks)
+    mixerTrackPages = [];
+    for (let i = 1; i <= 8; i++) {
+        const page = mixerTrack.createCursorRemoteControlsPage("MiddleKnobs_Page" + i, 8, null);
+        page.selectedPageIndex().set(i);
+        mixerTrackPages[i] = page;
+    }
     
     // Page 9 - Mixer device (Sliders)
     remoteControlsPage9 = cursorDevice.createCursorRemoteControlsPage("Sliders", 8, null);
     remoteControlsPage9.selectedPageIndex().set(9);
 
     // Mark parameters as interested
-    [remoteControlsPage0, remoteControlsPage1, remoteControlsPage9].forEach(page => {
+    [remoteControlsPage0].forEach(page => {
         for (let i = 0; i < 8; i++) {
             page.getParameter(i).exists().markInterested();
         }
     });
+    
+    // Mark mixer track pages parameters as interested
+    for (let i = 1; i <= 8; i++) {
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            mixerTrackPages[i].getParameter(paramIndex).exists().markInterested();
+        }
+    }
+    
+    // Mark page 9 parameters as interested
+    for (let i = 0; i < 8; i++) {
+        remoteControlsPage9.getParameter(i).exists().markInterested();
+    }
 }
 
 function setupChildTrackControls() {
@@ -161,11 +177,16 @@ function setupObservers() {
     });
 
     // Parameter existence observers
-    [remoteControlsPage0, remoteControlsPage1].forEach(page => {
-        for (let i = 0; i < 8; i++) {
-            page.getParameter(i).exists().addValueObserver(updateLeds);
+    for (let i = 0; i < 8; i++) {
+        remoteControlsPage0.getParameter(i).exists().addValueObserver(updateLeds);
+    }
+    
+    // Mixer track pages observers
+    for (let pageIndex = 1; pageIndex <= 8; pageIndex++) {
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            mixerTrackPages[pageIndex].getParameter(paramIndex).exists().addValueObserver(updateLeds);
         }
-    });
+    }
 
     // Child track observers
     for (let i = 1; i <= 8; i++) {
@@ -194,9 +215,15 @@ function setupObservers() {
     remoteControlsPage0.selectedPageIndex().addValueObserver((index) => {
         if (index !== 0) remoteControlsPage0.selectedPageIndex().set(0);
     });
-    remoteControlsPage1.selectedPageIndex().addValueObserver((index) => {
-        if (index !== 1) remoteControlsPage1.selectedPageIndex().set(1);
-    });
+    
+    // Keep mixer track pages fixed
+    for (let i = 1; i <= 8; i++) {
+        const targetPageIndex = i;
+        mixerTrackPages[i].selectedPageIndex().addValueObserver((index) => {
+            if (index !== targetPageIndex) mixerTrackPages[i].selectedPageIndex().set(targetPageIndex);
+        });
+    }
+    
     remoteControlsPage9.selectedPageIndex().addValueObserver((index) => {
         if (index !== 9) remoteControlsPage9.selectedPageIndex().set(9);
     });
@@ -267,7 +294,7 @@ function handleCC(cc, value) {
     if (cc >= CC.KNOB_T1 && cc <= CC.KNOB_T8) {
         parameter = remoteControlsPage0?.getParameter(paramIndex);
     } else if (cc >= CC.KNOB_M1 && cc <= CC.KNOB_M8) {
-        parameter = remoteControlsPage1?.getParameter(paramIndex);
+        parameter = mixerTrackPages[currentSelectedChildIndex]?.getParameter(paramIndex);
     } else if (cc >= CC.KNOB_B1 && cc <= CC.KNOB_B8) {
         parameter = childTrackPage1Controls[currentSelectedChildIndex]?.getParameter(paramIndex);
     } else if (cc >= CC.SLIDER1 && cc <= CC.SLIDER8) {
@@ -336,8 +363,9 @@ function updateTrackButtonLeds() {
 }
 
 function updateMiddleKnobLeds() {
+    const currentMixerPage = mixerTrackPages[currentSelectedChildIndex];
     for (let i = 0; i < 8; i++) {
-        const exists = remoteControlsPage1?.getParameter(i).exists().get();
+        const exists = currentMixerPage?.getParameter(i).exists().get();
         const color = (exists && mixerTrack?.exists().get()) ? LED_COLOR.YELLOW_FULL : LED_COLOR.OFF;
         sendLedUpdateKnob('M', i, color);
     }
