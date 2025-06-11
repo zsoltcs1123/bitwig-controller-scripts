@@ -39,6 +39,8 @@ const NOTE = {
     // Bottom Row Buttons
     BTN_B1: 73, BTN_B2: 74, BTN_B3: 75, BTN_B4: 76, 
     BTN_B5: 89, BTN_B6: 90, BTN_B7: 91, BTN_B8: 92,
+    // Side Buttons
+    BTN_REC_ARM: 108,
 };
 
 const LED_COLOR = {
@@ -58,6 +60,14 @@ let remoteControlsPage0, mixerTrackPages, remoteControlsPage9;
 let currentSelectedChildIndex = 1;
 let childTrackControls = [];
 let childTrackPage1Controls = [];
+let childTrackClipLaunchers = [];
+let isClipMode = false;
+let clipHasContent = [];
+let clipIsPlaying = [];
+let flashState = false;
+let flashTimer = null;
+let currentTempo = 120; // Default BPM
+let transport;
 
 // --- Initialization ---
 function init() {
@@ -76,20 +86,35 @@ function init() {
     // Setup tracks
     trackBank = host.createTrackBank(8, 0, 0, false);
     currentTrack = trackBank.getItemAt(DEFAULT_TRACK_INDEX);
-    childTrackBank = currentTrack.createTrackBank(9, 0, 0, false);
+    childTrackBank = currentTrack.createTrackBank(9, 0, 8, false); // Add 8 scenes for clip launcher
     mixerTrack = childTrackBank.getItemAt(0);
 
     // Setup device
     const mixerDeviceBank = mixerTrack.createDeviceBank(1);
     cursorDevice = mixerDeviceBank.getDevice(0);
+    
+    // Setup transport for BPM
+    transport = host.createTransport();
+    transport.tempo().value().markInterested();
+    transport.tempo().value().addValueObserver((tempo) => {
+        // Convert normalized tempo (0.0-1.0) to actual BPM (20-666)
+        currentTempo = 20 + (tempo * 646);
+        if (DEBUG) {
+            host.println(`Tempo changed to: ${currentTempo.toFixed(1)} BPM`);
+        }
+    });
 
     // Setup remote controls
     setupRemoteControls();
     setupChildTrackControls();
+    setupClipLaunchers();
     setupObservers();
 
     // Initial LED update
     updateAllLeds();
+    
+    // Start LED flash timer for playing clips
+    startFlashTimer();
 
     host.println("LCXL SubMixer initialized successfully.");
 }
@@ -156,6 +181,44 @@ function setupChildTrackControls() {
                 param.exists().markInterested();
                 param.value().markInterested();
             });
+        }
+    }
+}
+
+function setupClipLaunchers() {
+    // Initialize arrays for clip data
+    for (let childIndex = 1; childIndex <= 8; childIndex++) {
+        clipHasContent[childIndex] = [];
+        clipIsPlaying[childIndex] = [];
+        
+        const childTrack = childTrackBank.getItemAt(childIndex);
+        
+        // Try the deprecated method which might be more reliable
+        const clipLauncher = childTrack.getClipLauncherSlots();
+        
+        childTrackClipLaunchers[childIndex] = clipLauncher;
+        
+        // Setup observers for clips 0-7 (we'll use 0-7 for buttons 1-8)
+        clipLauncher.addHasContentObserver((slotIndex, hasContent) => {
+            clipHasContent[childIndex][slotIndex] = hasContent;
+            if (DEBUG) {
+                host.println(`Child ${childIndex} Slot ${slotIndex} hasContent: ${hasContent}`);
+            }
+            updateTrackButtonLeds(); // Update top buttons since clips are now on top
+        });
+        
+        clipLauncher.addIsPlayingObserver((slotIndex, isPlaying) => {
+            clipIsPlaying[childIndex][slotIndex] = isPlaying;
+            if (DEBUG) {
+                host.println(`Child ${childIndex} Slot ${slotIndex} isPlaying: ${isPlaying}`);
+            }
+            updateTrackButtonLeds(); // Update top buttons since clips are now on top
+        });
+        
+        // Initialize arrays for each clip slot
+        for (let clipIndex = 0; clipIndex < 8; clipIndex++) {
+            clipHasContent[childIndex][clipIndex] = false;
+            clipIsPlaying[childIndex][clipIndex] = false;
         }
     }
 }
@@ -227,6 +290,26 @@ function setupObservers() {
     remoteControlsPage9.selectedPageIndex().addValueObserver((index) => {
         if (index !== 9) remoteControlsPage9.selectedPageIndex().set(9);
     });
+}
+
+// --- Flash Timer Functions ---
+function startFlashTimer() {
+    // Calculate flash interval based on BPM (flash once per beat = quarter notes)
+    const flashIntervalMs = Math.round(60000 / currentTempo); // Quarter note timing
+    
+    flashTimer = host.scheduleTask(() => {
+        flashState = !flashState;
+        if (isClipMode) {
+            updateTopClipButtonLeds();
+        }
+        startFlashTimer(); // Reschedule for next flash
+    }, flashIntervalMs);
+}
+
+function stopFlashTimer() {
+    if (flashTimer) {
+        flashTimer = null;
+    }
 }
 
 // --- Helper Functions ---
@@ -308,26 +391,69 @@ function handleCC(cc, value) {
 }
 
 function handleNoteOn(note, velocity) {
-    const buttonIndex = findButtonIndex(note);
-    if (buttonIndex === -1) return;
-
-    // Top buttons - child track selection
-    if (note >= NOTE.BTN_T1 && note <= NOTE.BTN_T8) {
-        const targetChildIndex = buttonIndex + 1;
-        if (targetChildIndex !== currentSelectedChildIndex) {
-            currentSelectedChildIndex = targetChildIndex;
-            updateAllLeds();
+    // REC ARM button - toggle clip mode
+    if (note === NOTE.BTN_REC_ARM) {
+        isClipMode = !isClipMode;
+        updateAllLeds();
+        updateRecArmLed();
+        if (DEBUG) {
+            host.println(`Clip mode ${isClipMode ? 'enabled' : 'disabled'}`);
         }
         return;
     }
 
-    // Bottom buttons - toggle parameters
-    if (note >= NOTE.BTN_B1 && note <= NOTE.BTN_B8) {
-        const parameter = childTrackControls[currentSelectedChildIndex]?.getParameter(buttonIndex);
-        if (parameter?.exists().get()) {
-            const currentValue = parameter.value().get();
-            parameter.value().set(currentValue === 0 ? 127 : 0, 128);
+    const buttonIndex = findButtonIndex(note);
+    if (buttonIndex === -1) return;
+
+    // Top buttons - child track selection or clip control depending on mode
+    if (note >= NOTE.BTN_T1 && note <= NOTE.BTN_T8) {
+        if (isClipMode) {
+            handleClipLaunch(buttonIndex);
+        } else {
+            const targetChildIndex = buttonIndex + 1;
+            if (targetChildIndex !== currentSelectedChildIndex) {
+                currentSelectedChildIndex = targetChildIndex;
+                updateAllLeds();
+            }
         }
+        return;
+    }
+
+    // Bottom buttons - always parameter toggle (page 0)
+    if (note >= NOTE.BTN_B1 && note <= NOTE.BTN_B8) {
+        handleParameterToggle(buttonIndex);
+    }
+}
+
+function handleClipLaunch(buttonIndex) {
+    const clipLauncher = childTrackClipLaunchers[currentSelectedChildIndex];
+    if (!clipLauncher) return;
+    
+    const hasContent = clipHasContent[currentSelectedChildIndex][buttonIndex];
+    const isPlaying = clipIsPlaying[currentSelectedChildIndex][buttonIndex];
+    
+    if (DEBUG) {
+        host.println(`Clip ${buttonIndex + 1}: hasContent=${hasContent}, isPlaying=${isPlaying}`);
+    }
+    
+    if (hasContent) {
+        if (isPlaying) {
+            // Stop the playing clip
+            clipLauncher.stop();
+            if (DEBUG) host.println(`Stopped clip ${buttonIndex + 1} on child track ${currentSelectedChildIndex}`);
+        } else {
+            // Launch the clip
+            clipLauncher.launch(buttonIndex);
+            if (DEBUG) host.println(`Launched clip ${buttonIndex + 1} on child track ${currentSelectedChildIndex}`);
+        }
+    }
+}
+
+function handleParameterToggle(buttonIndex) {
+    const parameter = childTrackControls[currentSelectedChildIndex]?.getParameter(buttonIndex);
+    if (parameter?.exists().get()) {
+        const currentValue = parameter.value().get();
+        parameter.value().set(currentValue === 0 ? 127 : 0, 128);
     }
 }
 
@@ -338,6 +464,7 @@ function updateAllLeds() {
     updateMiddleKnobLeds();
     updateBottomButtonLeds();
     updateBottomKnobLeds();
+    updateRecArmLed();
 }
 
 function updateTopKnobLeds() {
@@ -349,6 +476,35 @@ function updateTopKnobLeds() {
 }
 
 function updateTrackButtonLeds() {
+    if (isClipMode) {
+        updateTopClipButtonLeds();
+    } else {
+        updateTopTrackSelectionLeds();
+    }
+}
+
+function updateTopClipButtonLeds() {
+    for (let i = 0; i < 8; i++) {
+        let color = LED_COLOR.OFF;
+        
+        const hasContent = clipHasContent[currentSelectedChildIndex]?.[i];
+        const isPlaying = clipIsPlaying[currentSelectedChildIndex]?.[i];
+        
+        if (hasContent) {
+            if (isPlaying) {
+                // Flash between full and low red for playing clips
+                color = flashState ? LED_COLOR.RED_FULL : 0x0D; // 0x0D is red low
+            } else {
+                // Solid red low for stopped clips with content
+                color = 0x0D; // 0x0D is red low
+            }
+        }
+        
+        sendLedUpdateButton('T', i, color);
+    }
+}
+
+function updateTopTrackSelectionLeds() {
     for (let i = 0; i < 8; i++) {
         const childIndex = i + 1;
         const childTrack = childTrackBank.getItemAt(childIndex);
@@ -372,6 +528,13 @@ function updateMiddleKnobLeds() {
 }
 
 function updateBottomButtonLeds() {
+    // Always show parameter mode for bottom buttons
+    updateParameterButtonLeds();
+}
+
+
+
+function updateParameterButtonLeds() {
     const trackControls = childTrackControls[currentSelectedChildIndex];
     
     for (let i = 0; i < 8; i++) {
@@ -395,6 +558,12 @@ function updateBottomKnobLeds() {
         const color = exists ? LED_COLOR.AMBER_FULL : LED_COLOR.OFF;
         sendLedUpdateKnob('B', i, color);
     }
+}
+
+function updateRecArmLed() {
+    // REC ARM button LED - from Launch Control XL reference: 0x2B (43) for Record Arm
+    const color = isClipMode ? LED_COLOR.RED_FULL : LED_COLOR.OFF;
+    sendSysexLedCommand(43, color);
 }
 
 function sendLedUpdateKnob(row, index, colorVelocity) {
@@ -437,11 +606,17 @@ function flush() {
 function exit() {
     host.println("LCXL SubMixer exiting...");
     
+    // Stop flash timer
+    stopFlashTimer();
+    
     // Turn off all LEDs
     for (let i = 0; i < 8; i++) {
         ['T', 'M', 'B'].forEach(row => sendLedUpdateKnob(row, i, LED_COLOR.OFF));
         ['T', 'B'].forEach(row => sendLedUpdateButton(row, i, LED_COLOR.OFF));
     }
+    
+    // Turn off REC ARM LED
+    sendSysexLedCommand(43, LED_COLOR.OFF);
     
     host.println("Thank you for using LCXL SubMixer!");
 } 
