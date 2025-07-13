@@ -1,0 +1,11 @@
+{
+    "name": "LaunchControlXL 3Layer",
+    "vendor": "Novation",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Novation LaunchControlXL 3-layer controller script",
+    "category": "Controller",
+    "hardware_vendor": "Novation",
+    "hardware_model": "LaunchControlXL",
+    "main": "lcxl-3layer.control.js"
+} 
