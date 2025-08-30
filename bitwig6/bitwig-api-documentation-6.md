@@ -1,3 +1,6 @@
+//Bitwig version 6.0 Beta 1
+//API Version 25
+
 # Bitwig API Documentation
 
 ## Package: com.bitwig.extension.api.util.midi

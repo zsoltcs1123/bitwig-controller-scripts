@@ -1,3 +1,7 @@
+// Bitwig version 5.3.13
+// API version 24
+
+
 # Bitwig API Documentation
 
 ## Package: com.bitwig.extension.api.util.midi
