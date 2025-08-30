@@ -30,6 +30,11 @@ const CC = {
     // Sliders
     SLIDER1: 77, SLIDER2: 78, SLIDER3: 79, SLIDER4: 80, 
     SLIDER5: 81, SLIDER6: 82, SLIDER7: 83, SLIDER8: 84,
+    // Directional Buttons (Send Select & Track Select)
+    SEND_SELECT_1: 104,   // Up button
+    SEND_SELECT_2: 105,   // Down button  
+    TRACK_SELECT_1: 106,  // Left button
+    TRACK_SELECT_2: 107,  // Right button
 };
 
 const NOTE = {
@@ -73,6 +78,9 @@ let track2RemoteControlsPages = [];
 let track2RemoteControlsPages1 = [];
 let track3s = [];
 let track3RemoteControlsPages = [];
+
+// Main group track remote controls (page index 1) for directional buttons
+let mainGroupRemoteControlsPages = [];
 
 // Button debounce
 let lastButtonPress = {};
@@ -180,8 +188,19 @@ function setupAllGroupNavigation() {
         }
         allGroupRemoteControls[trackIndex].track3Page2 = track3RemoteControlsPage2;
         
+        // Create remote control page for the main group track itself (page index 1)
+        // This is for the directional buttons (Up, Down, Left, Right)
+        const mainGroupRemoteControlsPage = track.createCursorRemoteControlsPage("MainGroup_" + trackIndex, 8, null);
+        mainGroupRemoteControlsPage.selectedPageIndex().set(1);
+        mainGroupRemoteControlsPages[trackIndex] = mainGroupRemoteControlsPage;
+        
+        // Keep main group page fixed at index 1
+        mainGroupRemoteControlsPage.selectedPageIndex().addValueObserver((index) => {
+            if (index !== 1) mainGroupRemoteControlsPage.selectedPageIndex().set(1);
+        });
+        
         // Setup parameter observers
-        setupParameterObservers(trackIndex, track1RemoteControlsPage, track1RemoteControlsPage1, track2RemoteControlsPage, track2RemoteControlsPage1, track3RemoteControlsPage, track3RemoteControlsPage2);
+        setupParameterObservers(trackIndex, track1RemoteControlsPage, track1RemoteControlsPage1, track2RemoteControlsPage, track2RemoteControlsPage1, track3RemoteControlsPage, track3RemoteControlsPage2, mainGroupRemoteControlsPage);
         
         // Keep pages fixed at their respective indices
         track1RemoteControlsPage.selectedPageIndex().addValueObserver((index) => {
@@ -207,7 +226,7 @@ function setupAllGroupNavigation() {
     host.println("✓ Group navigation setup complete for all tracks");
 }
 
-function setupParameterObservers(trackIndex, track1RemoteControlsPage, track1RemoteControlsPage1, track2RemoteControlsPage, track2RemoteControlsPage1, track3RemoteControlsPage, track3RemoteControlsPage2) {
+function setupParameterObservers(trackIndex, track1RemoteControlsPage, track1RemoteControlsPage1, track2RemoteControlsPage, track2RemoteControlsPage1, track3RemoteControlsPage, track3RemoteControlsPage2, mainGroupRemoteControlsPage) {
     // Setup parameter observers for each parameter page
     // With CursorDevice, these observers will automatically work with new devices
     for (let i = 0; i < 8; i++) {
@@ -292,6 +311,24 @@ function setupParameterObservers(trackIndex, track1RemoteControlsPage, track1Rem
         param3_2.value().markInterested();
         // Note: Faders don't have LEDs, so no visual feedback needed
     }
+    
+    // Setup observers for the first 4 parameters on the main group track (page index 1)
+    // These are for the directional buttons (Up, Down, Left, Right)
+    for (let i = 0; i < 4; i++) {
+        const mainGroupParam = mainGroupRemoteControlsPage.getParameter(i);
+        mainGroupParam.exists().markInterested();
+        mainGroupParam.value().markInterested();
+        mainGroupParam.exists().addValueObserver(() => {
+            if (trackIndex === currentTrackIndex) {
+                updateDirectionalButtonLeds();
+            }
+        });
+        mainGroupParam.value().addValueObserver(() => {
+            if (trackIndex === currentTrackIndex) {
+                updateDirectionalButtonLeds();
+            }
+        });
+    }
 }
 
 function setupObservers() {
@@ -366,6 +403,33 @@ function updateAllLeds() {
     updateMiddleRowKnobLeds();
     updateBottomRowKnobLeds();
     updateBottomRowLeds();
+    updateDirectionalButtonLeds();
+}
+
+function updateDirectionalButtonLeds() {
+    const directionalButtonLedIndices = [44, 45, 46, 47]; // SysEx indices for Up, Down, Left, Right
+    const mainGroupRemoteControlsPage = mainGroupRemoteControlsPages[currentTrackIndex];
+    
+    if (!mainGroupRemoteControlsPage) {
+        // Turn off all directional button LEDs if no remote controls page
+        for (const ledIndex of directionalButtonLedIndices) {
+            sendSysexLedCommand(ledIndex, LED_COLOR.OFF);
+        }
+        return;
+    }
+    
+    for (let i = 0; i < 4; i++) {
+        const param = mainGroupRemoteControlsPage.getParameter(i);
+        let color = LED_COLOR.OFF;
+        
+        if (param.exists().get()) {
+            const value = param.value().get();
+            // Show parameter state: full brightness when active, low brightness when inactive
+            color = (value > 0) ? LED_COLOR.RED_FULL : LED_COLOR.RED_LOW;
+        }
+        
+        sendSysexLedCommand(directionalButtonLedIndices[i], color);
+    }
 }
 
 function updateRecArmLed() {
@@ -613,6 +677,14 @@ function handleCC(cc, value) {
         }
         return;
     }
+    
+    // Handle directional buttons (Send Select & Track Select) - Main group track parameters
+    const directionalCCs = [CC.SEND_SELECT_1, CC.SEND_SELECT_2, CC.TRACK_SELECT_1, CC.TRACK_SELECT_2];
+    const directionalCCIndex = directionalCCs.indexOf(cc);
+    if (directionalCCIndex !== -1 && value > 0) { // Only handle button press (value > 0)
+        handleDirectionalButtonToggle(directionalCCIndex);
+        return;
+    }
 }
 
 function handleTopKnobChange(knobIndex, value) {
@@ -725,6 +797,44 @@ function handleBottomButtonParameterToggle(buttonIndex) {
     handleButtonParameterToggle(buttonIndex, track1RemoteControlsPage1, "Bottom");
 }
 
+function handleDirectionalButtonToggle(buttonIndex) {
+    const mainGroupRemoteControlsPage = mainGroupRemoteControlsPages[currentTrackIndex];
+    
+    if (!mainGroupRemoteControlsPage) {
+        if (DEBUG) {
+            host.println(`Directional button ${buttonIndex + 1} -> No main group remote controls page`);
+        }
+        return;
+    }
+    
+    const now = Date.now();
+    const buttonKey = `directional_${buttonIndex}`;
+    
+    if (lastButtonPress[buttonKey] && (now - lastButtonPress[buttonKey]) < BUTTON_DEBOUNCE_MS) {
+        if (DEBUG) {
+            host.println(`Directional button ${buttonIndex + 1} -> Debounced (too fast)`);
+        }
+        return;
+    }
+    lastButtonPress[buttonKey] = now;
+    
+    const parameter = mainGroupRemoteControlsPage.getParameter(buttonIndex);
+    if (parameter.exists().get()) {
+        const currentValue = parameter.value().get();
+        const newValue = currentValue > 0 ? 0 : 127;
+        parameter.value().set(newValue, 128);
+        
+        const buttonNames = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+        if (DEBUG) {
+            host.println(`Directional button ${buttonNames[buttonIndex]} -> Main group parameter ${buttonIndex}: ${currentValue} -> ${newValue}`);
+        }
+    } else {
+        if (DEBUG) {
+            host.println(`Directional button ${buttonIndex + 1} -> Parameter ${buttonIndex} does not exist`);
+        }
+    }
+}
+
 // --- Callbacks ---
 function flush() {
     // Called periodically - observers now handle LED updates automatically
@@ -756,6 +866,12 @@ function exit() {
     
     for (const button of allButtons) {
         sendLedUpdate(button, LED_COLOR.OFF);
+    }
+    
+    // Turn off directional button LEDs using SysEx
+    const directionalButtonLedIndices = [44, 45, 46, 47]; // Up, Down, Left, Right
+    for (const ledIndex of directionalButtonLedIndices) {
+        sendSysexLedCommand(ledIndex, LED_COLOR.OFF);
     }
     
     host.println("✓ LEDs turned off");
