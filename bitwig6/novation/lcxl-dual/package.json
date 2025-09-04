@@ -1,0 +1,11 @@
+{
+    "name": "LaunchControlXL Dual 6",
+    "vendor": "Novation",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Novation LaunchControlXL dual-layer controller script",
+    "category": "Controller",
+    "hardware_vendor": "Novation",
+    "hardware_model": "LaunchControlXL",
+    "main": "lcxl-dual.control.js"
+} 
