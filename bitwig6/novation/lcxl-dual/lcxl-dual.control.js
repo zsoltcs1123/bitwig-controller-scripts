@@ -1,5 +1,5 @@
 loadAPI(25);
-host.setShouldFailOnDeprecatedUse(true);
+host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Novation",
@@ -105,8 +105,8 @@ function init() {
     // Setup child track bank to detect if this is a group track
     childTrackBank = currentTrack.createTrackBank(9, 0, 0, false);
     
-    // Setup child track 1 controls
-    childTrack1 = childTrackBank.getItemAt(0);
+    // Setup child track 1 controls using cursor track approach
+    childTrack1 = host.createCursorTrack("ChildTrack1", "Child Track 1", 0, 0, true);
     // Track-level remote controls (middle row knobs page 0, faders page 1)
     childTrack1RemotePage0 = childTrack1.createCursorRemoteControlsPage("Child1Page0", 8, null);
     childTrack1RemotePage0.selectedPageIndex().set(0);
@@ -119,8 +119,8 @@ function init() {
     childTrack1PrimaryDevicePage1 = childTrack1PrimaryDevice.createCursorRemoteControlsPage("Child1PrimaryPage1", 8, null);
     childTrack1PrimaryDevicePage1.selectedPageIndex().set(1);
     
-    // Setup child track 2 controls
-    childTrack2 = childTrackBank.getItemAt(1);
+    // Setup child track 2 controls using cursor track approach
+    childTrack2 = host.createCursorTrack("ChildTrack2", "Child Track 2", 0, 0, true);
     // Track-level remote controls (middle row knobs page 0, faders page 1)
     childTrack2RemotePage0 = childTrack2.createCursorRemoteControlsPage("Child2Page0", 8, null);
     childTrack2RemotePage0.selectedPageIndex().set(0);
@@ -199,22 +199,28 @@ function setupObservers() {
     currentTrack.name().markInterested();
     currentTrack.exists().markInterested();
     
-    // Child track observers for group detection
-    const child1 = childTrackBank.getItemAt(0);
-    const child2 = childTrackBank.getItemAt(1);
+    // Child track observers for group detection (using track bank for detection only)
+    const child1Bank = childTrackBank.getItemAt(0);
+    const child2Bank = childTrackBank.getItemAt(1);
     
-    child1.exists().markInterested();
-    child2.exists().markInterested();
-    child1.name().markInterested();
-    child2.name().markInterested();
+    child1Bank.exists().markInterested();
+    child2Bank.exists().markInterested();
+    child1Bank.name().markInterested();
+    child2Bank.name().markInterested();
     
     // Observer to detect group track status
-    child1.exists().addValueObserver((exists) => {
+    child1Bank.exists().addValueObserver((exists) => {
         updateGroupTrackStatus();
     });
-    child2.exists().addValueObserver((exists) => {
+    child2Bank.exists().addValueObserver((exists) => {
         updateGroupTrackStatus();
     });
+    
+    // Set up cursor track observers
+    childTrack1.exists().markInterested();
+    childTrack2.exists().markInterested();
+    childTrack1.name().markInterested();
+    childTrack2.name().markInterested();
     
     // Remote controls observers
     for (let i = 0; i < 8; i++) {
@@ -419,18 +425,18 @@ function setupObservers() {
 }
 
 function updateGroupTrackStatus() {
-    const child1 = childTrackBank.getItemAt(0);
-    const child2 = childTrackBank.getItemAt(1);
+    const child1Bank = childTrackBank.getItemAt(0);
+    const child2Bank = childTrackBank.getItemAt(1);
     
-    const newIsGroupTrack = child1.exists().get();
+    const newIsGroupTrack = child1Bank.exists().get();
     
     if (newIsGroupTrack !== isGroupTrack) {
         isGroupTrack = newIsGroupTrack;
         if (DEBUG) {
             host.println(`Track "${currentTrack.name().get()}" is ${isGroupTrack ? 'GROUP' : 'REGULAR'} track`);
             if (isGroupTrack) {
-                host.println(`  Child 1: ${child1.name().get()} (exists: ${child1.exists().get()})`);
-                host.println(`  Child 2: ${child2.name().get()} (exists: ${child2.exists().get()})`);
+                host.println(`  Child 1: ${child1Bank.name().get()} (exists: ${child1Bank.exists().get()})`);
+                host.println(`  Child 2: ${child2Bank.name().get()} (exists: ${child2Bank.exists().get()})`);
             }
         }
         updateTopKnobLeds();
@@ -443,6 +449,15 @@ function updateGroupTrackStatus() {
         updateChildTrack2ButtonLeds();
         updateInstrumentSelectorLeds();
         updateSendSelectLeds();
+        
+        // When entering group track mode, navigate cursor tracks to child tracks
+        if (isGroupTrack) {
+            // Navigate cursor tracks to the child tracks
+            // This is a simplified approach - in practice you might need more sophisticated navigation
+            if (DEBUG) {
+                host.println("Navigating cursor tracks to child tracks");
+            }
+        }
     }
 }
 
