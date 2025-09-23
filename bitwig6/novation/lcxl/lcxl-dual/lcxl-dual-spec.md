@@ -1,9 +1,3 @@
-You're absolutely right! Let me analyze your existing script and extract a clear specification of how the LaunchControlXL Dual controller should work. This will give us a clean foundation to rebuild from scratch using modern API methods.
-
-[3 tools called]
-
-Perfect! Based on my analysis of your script, here's the complete specification for the **LaunchControlXL Dual Controller** in plain English:
-
 # LaunchControlXL Dual Controller Specification
 
 ## Core Concept
@@ -29,6 +23,8 @@ The controller operates in **two modes** depending on the selected track type:
 - **Faders**: Inactive
 - **Buttons**: Inactive (LEDs OFF)
 - **MUTE/SOLO/REC ARM/DEVICE**: Control current track's remote controls page 1
+
+> **Note**: The regular mode is not that important. It's just a fallback so that the controller does something when it's fixed to a track that is not a group track.
 
 ### 2. Group Track Mode (Dual Control)
 **When on a group track with child tracks:**

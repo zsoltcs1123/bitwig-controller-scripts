@@ -1,0 +1,11 @@
+{
+    "name": "X-Touch Mini Dual 6 MC Mode - Controller 1",
+    "vendor": "Behringer",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Behringer X-Touch Mini dual-layer controller script with advanced features",
+    "category": "Controller",
+    "hardware_vendor": "Behringer",
+    "hardware_model": "X-Touch Mini",
+    "main": "xtm-dual.control.js"
+}

@@ -11,7 +11,7 @@ host.defineController(
 host.defineMidiPorts(1, 1);
 
 const TARGET_MIDI_CHANNEL = 5; // MIDI Channel 6 (User Mode 6)
-const DEBUG = true;
+const DEBUG = true; 
 const DEFAULT_TRACK_INDEX = 0;
 
 const CC = {
