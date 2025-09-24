@@ -72,6 +72,7 @@ const NOTE = {
     LED_BUTTON_LOWER_5: 20, LED_BUTTON_LOWER_6: 21, LED_BUTTON_LOWER_7: 22, LED_BUTTON_LOWER_8: 23,
 };
 
+
 // LED Ring Behavior Constants
 const LED_RING_BEHAVIOR = {
     SINGLE: 0,
@@ -98,17 +99,27 @@ const LAYER = {
 let midiIn, midiOut;
 let currentLayer = LAYER.A; // Track current layer
 
-// Track Management
+// Track Management - Track Bank + Device Bank approach
 let trackBank;
 let pinnedGroupTrack;
 let childTrackBank;
 let childTrack0;
 let childTrack1;
+let childTrack0DeviceBank;
+let childTrack1DeviceBank;
 
 // Remote Control Pages
 let groupTrackRemotePage4;
-let childTrack0RemotePage0, childTrack0RemotePage1, childTrack0RemotePage2;
-let childTrack1RemotePage0, childTrack1RemotePage1, childTrack1RemotePage2;
+
+// Primary Device Controls for Child Tracks
+let childTrack0PrimaryDevice, childTrack1PrimaryDevice;
+let childTrack0PrimaryDevicePage0, childTrack0PrimaryDevicePage1, childTrack0PrimaryDevicePage2;
+let childTrack1PrimaryDevicePage0, childTrack1PrimaryDevicePage1, childTrack1PrimaryDevicePage2;
+
+// Instrument Selector Controls
+// Upper buttons 1-4 select instruments on Child Track 0 (chains 0-3)
+// Upper buttons 5-8 select instruments on Child Track 1 (chains 0-3)
+let childTrack0ChainSelector, childTrack1ChainSelector;
 
 function init() {
     // Initialize MIDI
@@ -236,10 +247,10 @@ function handleEncoderTurn(encoderIndex, value, layer) {
     
     // Encoders are layer-independent - same functionality in both layers
     
-    // Encoders 1-4 (index 0-3) control Child Track 0 Page 0
+    // Encoders 1-4 (index 0-3) control Child Track 0 Primary Device Page 0
     if (encoderIndex >= 0 && encoderIndex <= 3) {
-        if (childTrack0RemotePage0) {
-            const param = childTrack0RemotePage0.getParameter(encoderIndex);
+        if (childTrack0PrimaryDevicePage0) {
+            const param = childTrack0PrimaryDevicePage0.getParameter(encoderIndex);
             try {
                 // Convert MIDI value (0-127) to parameter value (0.0-1.0)
                 const paramValue = value / 127.0;
@@ -249,25 +260,25 @@ function handleEncoderTurn(encoderIndex, value, layer) {
                 // updateEncoderLEDRing(encoderIndex, paramValue);
                 
                 if (DEBUG) {
-                    host.println(`Set Child Track 0 Page 0 Parameter ${encoderIndex} to ${paramValue.toFixed(3)}`);
+                    host.println(`Set Child Track 0 Primary Device Page 0 Parameter ${encoderIndex} to ${paramValue.toFixed(3)}`);
                 }
             } catch (error) {
                 if (DEBUG) {
-                    host.println(`Error setting Child Track 0 Parameter ${encoderIndex}: ${error}`);
+                    host.println(`Error setting Child Track 0 Primary Device Parameter ${encoderIndex}: ${error}`);
                 }
             }
         } else {
             if (DEBUG) {
-                host.println(`Child Track 0 remote page not available for encoder ${encoderIndex + 1}`);
+                host.println(`Child Track 0 primary device page not available for encoder ${encoderIndex + 1}`);
             }
         }
     }
     
-    // Encoders 5-8 (index 4-7) control Child Track 1 Page 0
+    // Encoders 5-8 (index 4-7) control Child Track 1 Primary Device Page 0
     else if (encoderIndex >= 4 && encoderIndex <= 7) {
-        if (childTrack1RemotePage0) {
+        if (childTrack1PrimaryDevicePage0) {
             const paramIndex = encoderIndex - 4; // Convert to 0-3 range
-            const param = childTrack1RemotePage0.getParameter(paramIndex);
+            const param = childTrack1PrimaryDevicePage0.getParameter(paramIndex);
             try {
                 // Convert MIDI value (0-127) to parameter value (0.0-1.0)
                 const paramValue = value / 127.0;
@@ -277,16 +288,16 @@ function handleEncoderTurn(encoderIndex, value, layer) {
                 // updateEncoderLEDRing(encoderIndex, paramValue);
                 
                 if (DEBUG) {
-                    host.println(`Set Child Track 1 Page 0 Parameter ${paramIndex} to ${paramValue.toFixed(3)}`);
+                    host.println(`Set Child Track 1 Primary Device Page 0 Parameter ${paramIndex} to ${paramValue.toFixed(3)}`);
                 }
             } catch (error) {
                 if (DEBUG) {
-                    host.println(`Error setting Child Track 1 Parameter ${paramIndex}: ${error}`);
+                    host.println(`Error setting Child Track 1 Primary Device Parameter ${paramIndex}: ${error}`);
                 }
             }
         } else {
             if (DEBUG) {
-                host.println(`Child Track 1 remote page not available for encoder ${encoderIndex + 1}`);
+                host.println(`Child Track 1 primary device page not available for encoder ${encoderIndex + 1}`);
             }
         }
     }
@@ -305,7 +316,42 @@ function handleUpperButton(buttonIndex, isPressed, layer) {
         host.println(`Layer ${layer} - Upper button ${buttonIndex + 1} ${isPressed ? 'pressed' : 'released'}`);
     }
     
-    // Just log for now - no functionality
+    // Only handle button presses, not releases
+    if (!isPressed) {
+        return;
+    }
+    
+    // Upper buttons 1-4 (index 0-3) control Child Track 0 instrument selection
+    if (buttonIndex >= 0 && buttonIndex <= 3) {
+        const chainIndex = buttonIndex; // Direct mapping: button 1 -> chain 0, button 2 -> chain 1, etc.
+        
+        if (canSelectInstrumentOnChildTrack0()) {
+            selectInstrumentOnChildTrack0(chainIndex);
+        } else {
+            if (DEBUG) {
+                host.println(`Upper button ${buttonIndex + 1} pressed but child track 0 instrument selector not available`);
+            }
+        }
+        return;
+    }
+    
+    // Upper buttons 5-8 (index 4-7) control Child Track 1 instrument selection
+    if (buttonIndex >= 4 && buttonIndex <= 7) {
+        const chainIndex = buttonIndex - 4; // Map to 0-3 range: button 5 -> chain 0, button 6 -> chain 1, etc.
+        
+        if (canSelectInstrumentOnChildTrack1()) {
+            selectInstrumentOnChildTrack1(chainIndex);
+        } else {
+            if (DEBUG) {
+                host.println(`Upper button ${buttonIndex + 1} pressed but child track 1 instrument selector not available`);
+            }
+        }
+        return;
+    }
+    
+    if (DEBUG) {
+        host.println(`Upper button ${buttonIndex + 1} - no functionality mapped`);
+    }
 }
 
 function handleLowerButton(buttonIndex, isPressed, layer) {
@@ -366,62 +412,42 @@ function setButtonLED(buttonIndex, state) {
 // LED update functions removed - Bitwig handles this automatically!
 
 function setupTracks() {
-    if (DEBUG) {
-        host.println("=== Setting up Track Management ===");
-    }
+        if (DEBUG) {
+            host.println("=== Setting up Track Management (Track Bank + Device Bank Approach) ===");
+        }
     
     try {
-        // Create main track bank to access the pinned group track
-        trackBank = host.createMainTrackBank(8, 0, 0); // 8 tracks, no sends, no scenes for now
+        // Create main track bank and get the pinned group track
+        trackBank = host.createTrackBank(8, 0, 0, false);
+        pinnedGroupTrack = trackBank.getTrack(PINNED_GROUP_TRACK_INDEX);
         
-        // Get the pinned group track
-        pinnedGroupTrack = trackBank.getItemAt(PINNED_GROUP_TRACK_INDEX);
+        // Create child track bank from the group track
+        childTrackBank = pinnedGroupTrack.createTrackBank(8, 0, 0, false);
+        childTrack0 = childTrackBank.getTrack(0);
+        childTrack1 = childTrackBank.getTrack(1);
         
-        // Set up track existence observer
-        pinnedGroupTrack.exists().addValueObserver(function(exists) {
-            pinnedTrackExists = exists;
-            if (DEBUG) {
-                host.println(`Pinned track ${PINNED_GROUP_TRACK_INDEX} exists: ${exists}`);
-            }
-        });
+        // Create device banks for accessing primary devices
+        childTrack0DeviceBank = childTrack0.createDeviceBank(8);
+        childTrack1DeviceBank = childTrack1.createDeviceBank(8);
         
-        // Set up track name observer
-        pinnedGroupTrack.name().addValueObserver(function(name) {
-            if (DEBUG) {
-                host.println(`Pinned track name: ${name}`);
-            }
-        });
+        if (DEBUG) {
+            host.println("Created track banks and device banks (no cursor tracks)");
+        }
         
-        // Set up group track detection observer
-        pinnedGroupTrack.isGroup().addValueObserver(function(isGroup) {
-            pinnedTrackIsGroup = isGroup;
-            if (DEBUG) {
-                host.println(`Pinned track is group: ${isGroup}`);
-            }
-            
-            if (isGroup) {
-                if (DEBUG) {
-                    host.println("Group track detected - child track bank should now be active");
-                }
-            } else {
-                if (DEBUG) {
-                    host.println("WARNING: Pinned track is not a group track - child track functionality will be disabled");
-                }
-                // Set child tracks to null for non-group tracks
-                childTrack0 = null;
-                childTrack1 = null;
-                childTrackBank = null;
-            }
-        });
+        if (DEBUG) {
+            host.println("=== Setup Complete - Controller Ready ===");
+        }
         
-        // Initial setup - create child track bank (will be properly configured when group status is detected)
-        setupChildTrackBank();
+        if (DEBUG) {
+            host.println("Track bank and device bank setup complete");
+        }
+        
+        
+        // Set up observers for tracks
+        setupTrackObservers();
         
         // Setup Remote Control Pages
         setupRemoteControlPages();
-        
-        // Initialize LED ring behaviors to FAN mode once
-        // initializeLEDRings();
         
         if (DEBUG) {
             host.println("Track management setup complete");
@@ -437,41 +463,68 @@ function setupTracks() {
     }
 }
 
-function setupChildTrackBank() {
+function setupTrackObservers() {
     try {
         if (DEBUG) {
-            host.println("Setting up child track bank...");
+            host.println("Setting up track observers...");
         }
         
-        // Only create child track bank if it doesn't exist yet
-        if (!childTrackBank) {
-            // Create child track bank for the pinned group track
-            childTrackBank = pinnedGroupTrack.createTrackBank(8, 0, 0, false);
-            
-            // Get the first two child tracks from the bank
-            childTrack0 = childTrackBank.getItemAt(0);
-            childTrack1 = childTrackBank.getItemAt(1);
-            
-            // Set up child track observers
-            setupChildTrackObservers();
-            
+        // Set up observers for pinned group track
+        pinnedGroupTrack.exists().addValueObserver(function(exists) {
+            pinnedTrackExists = exists;
             if (DEBUG) {
-                host.println("Child track bank setup complete");
+                host.println(`Pinned group track exists: ${exists}`);
             }
-        } else {
+        });
+        
+        pinnedGroupTrack.name().addValueObserver(function(name) {
             if (DEBUG) {
-                host.println("Child track bank already exists, skipping creation");
+                host.println(`Pinned group track name: ${name}`);
             }
+        });
+        
+        pinnedGroupTrack.isGroup().addValueObserver(function(isGroup) {
+            pinnedTrackIsGroup = isGroup;
+            if (DEBUG) {
+                host.println(`Pinned group track is group: ${isGroup}`);
+            }
+        });
+        
+        // Set up observers for child tracks
+        childTrack0.exists().addValueObserver(function(exists) {
+            childTrack0Exists = exists;
+            if (DEBUG) {
+                host.println(`Child Track 0 exists: ${exists}`);
+            }
+        });
+        
+        childTrack0.name().addValueObserver(function(name) {
+            if (DEBUG) {
+                host.println(`Child Track 0 name: ${name}`);
+            }
+        });
+        
+        childTrack1.exists().addValueObserver(function(exists) {
+            childTrack1Exists = exists;
+            if (DEBUG) {
+                host.println(`Child Track 1 exists: ${exists}`);
+            }
+        });
+        
+        childTrack1.name().addValueObserver(function(name) {
+            if (DEBUG) {
+                host.println(`Child Track 1 name: ${name}`);
+            }
+        });
+        
+        if (DEBUG) {
+            host.println("Track observers setup complete");
         }
         
     } catch (error) {
         if (DEBUG) {
-            host.println(`ERROR in setupChildTrackBank: ${error}`);
+            host.println(`ERROR in setupTrackObservers: ${error}`);
         }
-        // Fallback - set to null if setup fails
-        childTrack0 = null;
-        childTrack1 = null;
-        childTrackBank = null;
     }
 }
 
@@ -481,13 +534,13 @@ function setupRemoteControlPages() {
             host.println("=== Setting up Remote Control Pages ===");
         }
         
-        // Setup Group Track Remote Control Page 4 (for fader)
+        // Setup Group Track Remote Control Page 4 (for fader) using pinned group track
         if (pinnedGroupTrack) {
             groupTrackRemotePage4 = pinnedGroupTrack.createCursorRemoteControlsPage("GroupPage4", 8, null);
             groupTrackRemotePage4.selectedPageIndex().set(4);
             
             if (DEBUG) {
-                host.println("Created Group Track Remote Control Page 4");
+                host.println("Created Group Track Remote Control Page 4 (using pinned group track)");
             }
             
             // Setup parameter observers for group track page 4
@@ -510,7 +563,7 @@ function setupRemoteControlPages() {
             }
         }
         
-        // Setup Child Track Remote Control Pages (will be configured when child tracks are available)
+        // Setup Child Track Remote Control Pages (immediate setup like LCXL)
         setupChildTrackRemotePages();
         
         if (DEBUG) {
@@ -534,34 +587,49 @@ function setupChildTrackRemotePages() {
     
     try {
         if (DEBUG) {
-            host.println("Setting up child track remote control pages...");
+            host.println("Setting up primary devices using pre-created device banks...");
         }
         
-        // Child Track 0 Remote Control Pages
-        childTrack0RemotePage0 = childTrack0.createCursorRemoteControlsPage("Child0Page0", 8, null);
-        childTrack0RemotePage0.selectedPageIndex().set(0);
+        // Use the device banks we created during track setup
+        const childTrack0Device = childTrack0DeviceBank.getDevice(0); // Get first device (primary)
+        const childTrack1Device = childTrack1DeviceBank.getDevice(0); // Get first device (primary)
         
-        childTrack0RemotePage1 = childTrack0.createCursorRemoteControlsPage("Child0Page1", 8, null);
-        childTrack0RemotePage1.selectedPageIndex().set(1);
+        // Create remote control pages on the devices
+        childTrack0PrimaryDevicePage0 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage0", 8, null);
+        childTrack0PrimaryDevicePage0.selectedPageIndex().set(0);
         
-        childTrack0RemotePage2 = childTrack0.createCursorRemoteControlsPage("Child0Page2", 8, null);
-        childTrack0RemotePage2.selectedPageIndex().set(2);
+        childTrack0PrimaryDevicePage1 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage1", 8, null);
+        childTrack0PrimaryDevicePage1.selectedPageIndex().set(1);
         
-        // Child Track 1 Remote Control Pages
-        childTrack1RemotePage0 = childTrack1.createCursorRemoteControlsPage("Child1Page0", 8, null);
-        childTrack1RemotePage0.selectedPageIndex().set(0);
+        childTrack0PrimaryDevicePage2 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage2", 8, null);
+        childTrack0PrimaryDevicePage2.selectedPageIndex().set(2);
         
-        childTrack1RemotePage1 = childTrack1.createCursorRemoteControlsPage("Child1Page1", 8, null);
-        childTrack1RemotePage1.selectedPageIndex().set(1);
+        childTrack1PrimaryDevicePage0 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage0", 8, null);
+        childTrack1PrimaryDevicePage0.selectedPageIndex().set(0);
         
-        childTrack1RemotePage2 = childTrack1.createCursorRemoteControlsPage("Child1Page2", 8, null);
-        childTrack1RemotePage2.selectedPageIndex().set(2);
+        childTrack1PrimaryDevicePage1 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage1", 8, null);
+        childTrack1PrimaryDevicePage1.selectedPageIndex().set(1);
         
-        // Setup parameter observers for all child track pages
+        childTrack1PrimaryDevicePage2 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage2", 8, null);
+        childTrack1PrimaryDevicePage2.selectedPageIndex().set(2);
+        
+        // Store device references for later use
+        childTrack0PrimaryDevice = childTrack0Device;
+        childTrack1PrimaryDevice = childTrack1Device;
+        
+        // Setup Instrument Selector Controls
+        childTrack0ChainSelector = childTrack0PrimaryDevice.createChainSelector();
+        childTrack1ChainSelector = childTrack1PrimaryDevice.createChainSelector();
+        
+        if (DEBUG) {
+            host.println("Created chain selectors for both child tracks");
+        }
+        
+        // Setup parameter observers for all child track device pages
         setupChildTrackParameterObservers();
         
         if (DEBUG) {
-            host.println("Child track remote control pages setup complete");
+            host.println("Child track device remote control pages setup complete");
         }
         
     } catch (error) {
@@ -572,13 +640,16 @@ function setupChildTrackRemotePages() {
 }
 
 function setupChildTrackParameterObservers() {
+    // Setup Chain Selector Observers
+    setupChainSelectorObservers();
+    
     const pages = [
-        { page: childTrack0RemotePage0, name: "Child0Page0" },
-        { page: childTrack0RemotePage1, name: "Child0Page1" },
-        { page: childTrack0RemotePage2, name: "Child0Page2" },
-        { page: childTrack1RemotePage0, name: "Child1Page0" },
-        { page: childTrack1RemotePage1, name: "Child1Page1" },
-        { page: childTrack1RemotePage2, name: "Child1Page2" }
+        { page: childTrack0PrimaryDevicePage0, name: "Child0PrimaryPage0" },
+        { page: childTrack0PrimaryDevicePage1, name: "Child0PrimaryPage1" },
+        { page: childTrack0PrimaryDevicePage2, name: "Child0PrimaryPage2" },
+        { page: childTrack1PrimaryDevicePage0, name: "Child1PrimaryPage0" },
+        { page: childTrack1PrimaryDevicePage1, name: "Child1PrimaryPage1" },
+        { page: childTrack1PrimaryDevicePage2, name: "Child1PrimaryPage2" }
     ];
     
     pages.forEach(pageInfo => {
@@ -609,65 +680,136 @@ function setupChildTrackParameterObservers() {
     });
 }
 
-function setupChildTrackObservers() {
-    if (!childTrack0 || !childTrack1) {
-        if (DEBUG) {
-            host.println("Skipping child track observers - child tracks not available");
-        }
-        return;
-    }
-    
+function setupChainSelectorObservers() {
     try {
-        // Mark child track properties as interested
-        childTrack0.exists().markInterested();
-        childTrack0.name().markInterested();
-        childTrack1.exists().markInterested();
-        childTrack1.name().markInterested();
+        if (DEBUG) {
+            host.println("Setting up chain selector observers...");
+        }
         
-        // Child Track 0 observers
-        childTrack0.exists().addValueObserver(function(exists) {
-            childTrack0Exists = exists;
-            if (DEBUG) {
-                host.println(`Child Track 0 exists: ${exists}`);
-                if (!exists) {
-                    host.println("WARNING: Child Track 0 does not exist - group may have insufficient child tracks");
+        // Child Track 0 Chain Selector Observers
+        if (childTrack0ChainSelector) {
+            childTrack0ChainSelector.exists().markInterested();
+            childTrack0ChainSelector.activeChainIndex().markInterested();
+            childTrack0ChainSelector.chainCount().markInterested();
+            
+            childTrack0ChainSelector.exists().addValueObserver(function(exists) {
+                if (DEBUG) {
+                    host.println(`Child Track 0 chain selector exists: ${exists}`);
                 }
-            }
-        });
-        
-        childTrack0.name().addValueObserver(function(name) {
-            if (DEBUG) {
-                host.println(`Child Track 0 name: ${name}`);
-            }
-        });
-        
-        // Child Track 1 observers  
-        childTrack1.exists().addValueObserver(function(exists) {
-            childTrack1Exists = exists;
-            if (DEBUG) {
-                host.println(`Child Track 1 exists: ${exists}`);
-                if (!exists) {
-                    host.println("WARNING: Child Track 1 does not exist - group may have insufficient child tracks");
+            });
+            
+            childTrack0ChainSelector.activeChainIndex().addValueObserver(function(index) {
+                if (DEBUG) {
+                    host.println(`Child Track 0 active chain index: ${index}`);
                 }
-            }
-        });
+            });
+            
+            childTrack0ChainSelector.chainCount().addValueObserver(function(count) {
+                if (DEBUG) {
+                    host.println(`Child Track 0 chain count: ${count}`);
+                }
+            });
+        }
         
-        childTrack1.name().addValueObserver(function(name) {
-            if (DEBUG) {
-                host.println(`Child Track 1 name: ${name}`);
-            }
-        });
+        // Child Track 1 Chain Selector Observers
+        if (childTrack1ChainSelector) {
+            childTrack1ChainSelector.exists().markInterested();
+            childTrack1ChainSelector.activeChainIndex().markInterested();
+            childTrack1ChainSelector.chainCount().markInterested();
+            
+            childTrack1ChainSelector.exists().addValueObserver(function(exists) {
+                if (DEBUG) {
+                    host.println(`Child Track 1 chain selector exists: ${exists}`);
+                }
+            });
+            
+            childTrack1ChainSelector.activeChainIndex().addValueObserver(function(index) {
+                if (DEBUG) {
+                    host.println(`Child Track 1 active chain index: ${index}`);
+                }
+            });
+            
+            childTrack1ChainSelector.chainCount().addValueObserver(function(count) {
+                if (DEBUG) {
+                    host.println(`Child Track 1 chain count: ${count}`);
+                }
+            });
+        }
         
         if (DEBUG) {
-            host.println("Child track observers setup complete");
+            host.println("Chain selector observers setup complete");
         }
         
     } catch (error) {
         if (DEBUG) {
-            host.println(`ERROR in setupChildTrackObservers: ${error}`);
+            host.println(`ERROR in setupChainSelectorObservers: ${error}`);
         }
     }
 }
+
+// Instrument Selector Helper Functions
+function canSelectInstrumentOnChildTrack0() {
+    return childTrack0ChainSelector && 
+           childTrack0ChainSelector.exists().get() && 
+           isChildTrack0Available();
+}
+
+function canSelectInstrumentOnChildTrack1() {
+    return childTrack1ChainSelector && 
+           childTrack1ChainSelector.exists().get() && 
+           isChildTrack1Available();
+}
+
+function selectInstrumentOnChildTrack0(chainIndex) {
+    if (!canSelectInstrumentOnChildTrack0()) {
+        if (DEBUG) {
+            host.println(`Cannot select instrument on child track 0 - chain selector not available`);
+        }
+        return false;
+    }
+    
+    const chainCount = childTrack0ChainSelector.chainCount().get();
+    if (chainIndex >= chainCount) {
+        if (DEBUG) {
+            host.println(`Cannot select instrument chain ${chainIndex} on child track 0 - only ${chainCount} chains available`);
+        }
+        return false;
+    }
+    
+    childTrack0ChainSelector.activeChainIndex().set(chainIndex);
+    
+    if (DEBUG) {
+        host.println(`Selected instrument chain ${chainIndex} on child track 0`);
+    }
+    
+    return true;
+}
+
+function selectInstrumentOnChildTrack1(chainIndex) {
+    if (!canSelectInstrumentOnChildTrack1()) {
+        if (DEBUG) {
+            host.println(`Cannot select instrument on child track 1 - chain selector not available`);
+        }
+        return false;
+    }
+    
+    const chainCount = childTrack1ChainSelector.chainCount().get();
+    if (chainIndex >= chainCount) {
+        if (DEBUG) {
+            host.println(`Cannot select instrument chain ${chainIndex} on child track 1 - only ${chainCount} chains available`);
+        }
+        return false;
+    }
+    
+    childTrack1ChainSelector.activeChainIndex().set(chainIndex);
+    
+    if (DEBUG) {
+        host.println(`Selected instrument chain ${chainIndex} on child track 1`);
+    }
+    
+    return true;
+}
+
 
 // Track state variables (updated by observers)
 let pinnedTrackExists = false;
@@ -697,6 +839,7 @@ function areBothChildTracksAvailable() {
     return isChildTrack0Available() && isChildTrack1Available();
 }
 
+
 function logTrackStatus() {
     if (DEBUG) {
         host.println("=== Track Status Summary ===");
@@ -708,7 +851,7 @@ function logTrackStatus() {
         host.println(`Child Track 1 available: ${isChildTrack1Available()}`);
         host.println(`Both child tracks available: ${areBothChildTracksAvailable()}`);
         host.println(`Group remote page 4: ${groupTrackRemotePage4 ? 'created' : 'not created'}`);
-        host.println(`Child remote pages: ${childTrack0RemotePage0 ? 'created' : 'not created'}`);
+        host.println(`Child primary device pages: ${childTrack0PrimaryDevicePage0 ? 'created' : 'not created'}`);
         host.println("========================");
     }
 }
