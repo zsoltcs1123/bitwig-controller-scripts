@@ -113,6 +113,11 @@ let childTrack1PrimaryDevicePage0, childTrack1PrimaryDevicePage1, childTrack1Pri
 // Upper buttons 5-8 select instruments on Child Track 1 (chains 0-3)
 let childTrack0ChainSelector, childTrack1ChainSelector;
 
+// Clip Launcher Controls
+// Lower buttons 1-4 launch clips on Child Track 0 (slots 0-3)
+// Lower buttons 5-8 launch clips on Child Track 1 (slots 0-3)
+let childTrack0ClipLauncherSlotBank, childTrack1ClipLauncherSlotBank;
+
 function init() {
     // Initialize MIDI
     midiIn = host.getMidiInPort(0);
@@ -131,11 +136,18 @@ function init() {
     setLayerLED('A', LED_STATE.ON);
     setLayerLED('B', LED_STATE.OFF);
     
+    // Initialize instrument button LEDs (will be updated by observers)
+    initializeInstrumentButtonLEDs();
+    
+    // Initialize clip launcher button LEDs (will be updated by observers)
+    initializeClipButtonLEDs();
+    
     if (DEBUG) {
         host.println("X-Touch Mini Dual (MC Mode) initialized - Layer A functionality enabled");
         host.println(`Current layer: ${currentLayer}`);
     }
 }
+
 
 function onMidi(status, data1, data2) {
     const channel = status & 0x0F;
@@ -253,12 +265,12 @@ function handleEncoderTurn(encoderIndex, value, layer) {
                 // Update LED ring to show current parameter value
                 updateEncoderLEDRing(encoderIndex, param.get());
             } catch (error) {
-                if (DEBUG) {
+    if (DEBUG) {
                     host.println(`Error incrementing Child Track 0 Primary Device Parameter ${encoderIndex}: ${error}`);
                 }
             }
         } else {
-            if (DEBUG) {
+    if (DEBUG) {
                 host.println(`Child Track 0 primary device page not available for encoder ${encoderIndex + 1}`);
             }
         }
@@ -312,6 +324,7 @@ function handleUpperButton(buttonIndex, isPressed, layer) {
         
         if (canSelectInstrumentOnChildTrack0()) {
             selectInstrumentOnChildTrack0(chainIndex);
+            // LED update will be triggered by the chain selector observer
         } else {
             if (DEBUG) {
                 host.println(`Upper button ${buttonIndex + 1} pressed but child track 0 instrument selector not available`);
@@ -326,14 +339,15 @@ function handleUpperButton(buttonIndex, isPressed, layer) {
         
         if (canSelectInstrumentOnChildTrack1()) {
             selectInstrumentOnChildTrack1(chainIndex);
-        } else {
+            // LED update will be triggered by the chain selector observer
+    } else {
             if (DEBUG) {
                 host.println(`Upper button ${buttonIndex + 1} pressed but child track 1 instrument selector not available`);
-            }
+    }
         }
         return;
-    }
-    
+}
+
     if (DEBUG) {
         host.println(`Upper button ${buttonIndex + 1} - no functionality mapped`);
     }
@@ -344,7 +358,64 @@ function handleLowerButton(buttonIndex, isPressed, layer) {
         host.println(`Layer ${layer} - Lower button ${buttonIndex + 1} ${isPressed ? 'pressed' : 'released'}`);
     }
     
-    // Just log for now - no functionality
+    // Only handle button presses, not releases
+    if (!isPressed) {
+        return;
+    }
+    
+    // Lower buttons 1-4 (index 0-3) launch clips on Child Track 0
+    if (buttonIndex >= 0 && buttonIndex <= 3) {
+        const slotIndex = buttonIndex; // Direct mapping: button 1 -> slot 0, button 2 -> slot 1, etc.
+        
+        if (childTrack0ClipLauncherSlotBank && childTrack0 && childTrack0.exists().get()) {
+            // Launch individual clip slot (not scene)
+            const clipSlot = childTrack0ClipLauncherSlotBank.getItemAt(slotIndex);
+            if (clipSlot) {
+                if (DEBUG) {
+                    host.println(`Launching clip slot ${slotIndex} on Child Track 0`);
+                }
+                clipSlot.launch();
+    } else {
+                if (DEBUG) {
+                    host.println(`❌ Child Track 0 clip slot ${slotIndex} does not exist`);
+                }
+            }
+        } else {
+    if (DEBUG) {
+                host.println(`❌ Lower button ${buttonIndex + 1} pressed but Child Track 0 clip launcher not available (track exists: ${childTrack0 ? childTrack0.exists().get() : 'no track'}, launcher: ${childTrack0ClipLauncherSlotBank ? 'yes' : 'no'})`);
+            }
+        }
+        return;
+    }
+    
+    // Lower buttons 5-8 (index 4-7) launch clips on Child Track 1
+    if (buttonIndex >= 4 && buttonIndex <= 7) {
+        const slotIndex = buttonIndex - 4; // Map to 0-3 range: button 5 -> slot 0, button 6 -> slot 1, etc.
+        
+        if (childTrack1ClipLauncherSlotBank) {
+            // Launch individual clip slot (not scene)
+            const clipSlot = childTrack1ClipLauncherSlotBank.getItemAt(slotIndex);
+            if (clipSlot) {
+                if (DEBUG) {
+                    host.println(`Launching clip slot ${slotIndex} on Child Track 1`);
+                }
+                clipSlot.launch();
+            } else {
+                if (DEBUG) {
+                    host.println(`❌ Child Track 1 clip slot ${slotIndex} does not exist`);
+                }
+            }
+    } else {
+            if (DEBUG) {
+                host.println(`❌ Lower button ${buttonIndex + 1} pressed but Child Track 1 clip launcher not available (launcher: ${childTrack1ClipLauncherSlotBank ? 'yes' : 'no'})`);
+            }
+        }
+        return;
+    }
+    
+    if (DEBUG) {
+        host.println(`Lower button ${buttonIndex + 1} - no functionality mapped`);
+    }
 }
 
 function handleFaderPitchBend(lsb, msb) {
@@ -377,7 +448,7 @@ function handleLayerButton(layer, isPressed) {
             setLayerLED('B', LED_STATE.OFF);
             if (DEBUG) {
                 host.println(`Layer A deactivated - no active layer`);
-            }
+        }
         } else {
             // Activate Layer A, deactivate Layer B
             currentLayer = LAYER.A;
@@ -413,7 +484,8 @@ function setLEDRingValue(encoderIndex, value) {
     // Mackie Control uses CC48-55 for LED rings with specific value ranges:
     // 0 = All LEDs Off
     // 1-11 = Single LED Mode (positions 1-11)
-    // 17-27 = Trim Mode, 33-43 = Fan Mode, 49-59 = Spread Mode
+    // 17-27 = Trim Mode, 33-43 = Fan Mode (positions 1-11), 49-59 = Spread Mode
+    // We're using Fan Mode: 32 + position (0-11)
     
     const ccNumbers = [CC.LED_RING_1, CC.LED_RING_2, CC.LED_RING_3, CC.LED_RING_4,
                        CC.LED_RING_5, CC.LED_RING_6, CC.LED_RING_7, CC.LED_RING_8];
@@ -424,19 +496,19 @@ function setLEDRingValue(encoderIndex, value) {
 
 function updateEncoderLEDRing(encoderIndex, parameterValue) {
     // Convert parameter value (0.0-1.0) to X-Touch Mini LED ring value
-    // Using Single LED Mode (based on working C# code)
+    // Using Fan Mode (based on working C# code: KnobRingStyle.Fan => value + 32)
     let position;
     if (parameterValue <= 0.0) {
         position = 0; // All LEDs off
     } else if (parameterValue >= 1.0) {
-        position = 11; // Rightmost LED on (max single LED position)
+        position = 11; // Maximum position
     } else {
         // Map 0.0-1.0 to LED positions 1-11
         position = Math.floor(parameterValue * 10) + 1;
     }
     
-    // Single LED Mode: just use the position value (0-11)
-    const ledValue = position;
+    // Fan Mode: add 32 to the position (C# code: KnobRingStyle.Fan => value + 32)
+    const ledValue = position + 32;
     
     // Send LED ring value using X-Touch Mini Mackie Control protocol
     setLEDRingValue(encoderIndex, ledValue);
@@ -460,9 +532,26 @@ function updateParameterLEDFeedback(pageName, parameterIndex, parameterValue) {
 
 function initializeLEDRings() {
     // Initialize all encoder LED rings using Mackie Control protocol
+    // Using Fan mode like the C# code Reset function
     for (let i = 0; i < 8; i++) {
-        // Turn off all LEDs (value 0)
-        setLEDRingValue(i, 0);
+        // Fan mode with position 0 (all LEDs off): 32 + 0 = 32
+        setLEDRingValue(i, 32);
+    }
+}
+
+function initializeInstrumentButtonLEDs() {
+    // Initialize all instrument button LEDs to off
+    // They will be updated by the chain selector observers once tracks are available
+    for (let i = 0; i < 8; i++) {
+        setInstrumentButtonLED(i, LED_STATE.OFF);
+    }
+}
+
+function initializeClipButtonLEDs() {
+    // Initialize all clip launcher button LEDs to off
+    // They will be updated by the clip launcher observers once tracks are available
+    for (let i = 0; i < 8; i++) {
+        setClipButtonLED(i, LED_STATE.OFF);
     }
 }
 
@@ -492,11 +581,72 @@ function setLayerLED(layer, state) {
     midiOut.sendMidi(0x90 + OUTPUT_MIDI_CHANNEL, note, velocity);
 }
 
-// LED update functions removed - Bitwig handles this automatically!
+// Instrument Button LED Functions
+function setInstrumentButtonLED(buttonIndex, state) {
+    // Map button index to the correct MIDI note
+    const upperButtonNotes = [NOTE.BUTTON_UPPER_1, NOTE.BUTTON_UPPER_2, NOTE.BUTTON_UPPER_3, NOTE.BUTTON_UPPER_4,
+                             NOTE.BUTTON_UPPER_5, NOTE.BUTTON_UPPER_6, NOTE.BUTTON_UPPER_7, NOTE.BUTTON_UPPER_8];
+    
+    if (buttonIndex >= 0 && buttonIndex < upperButtonNotes.length) {
+        const note = upperButtonNotes[buttonIndex];
+        const velocity = state; // 0=off, 127=on, 1=blinking
+        
+        // Always use Note On (0x90) with velocity for LED state
+        midiOut.sendMidi(0x90 + OUTPUT_MIDI_CHANNEL, note, velocity);
+    }
+}
+
+function updateChildTrack0InstrumentLEDs(activeChainIndex, chainCount) {
+    // Update LEDs for buttons 1-4 (Child Track 0)
+    for (let i = 0; i < 4; i++) {
+        if (i < chainCount && i === activeChainIndex) {
+            // This chain is active - turn LED on
+            setInstrumentButtonLED(i, LED_STATE.ON);
+        } else {
+            // This chain is inactive or doesn't exist - turn LED off
+            setInstrumentButtonLED(i, LED_STATE.OFF);
+        }
+    }
+}
+
+function updateChildTrack1InstrumentLEDs(activeChainIndex, chainCount) {
+    // Update LEDs for buttons 5-8 (Child Track 1)
+    for (let i = 4; i < 8; i++) {
+        const chainIndex = i - 4; // Convert to 0-3 range for Child Track 1
+        if (chainIndex < chainCount && chainIndex === activeChainIndex) {
+            // This chain is active - turn LED on
+            setInstrumentButtonLED(i, LED_STATE.ON);
+        } else {
+            // This chain is inactive or doesn't exist - turn LED off
+            setInstrumentButtonLED(i, LED_STATE.OFF);
+        }
+    }
+}
+
+// Clip Launcher Button LED Functions
+function setClipButtonLED(buttonIndex, state) {
+    // Map button index to the correct MIDI note (lower row buttons)
+    const lowerButtonNotes = [NOTE.BUTTON_LOWER_1, NOTE.BUTTON_LOWER_2, NOTE.BUTTON_LOWER_3, NOTE.BUTTON_LOWER_4,
+                             NOTE.BUTTON_LOWER_5, NOTE.BUTTON_LOWER_6, NOTE.BUTTON_LOWER_7, NOTE.BUTTON_LOWER_8];
+    
+    if (buttonIndex >= 0 && buttonIndex < lowerButtonNotes.length) {
+        const note = lowerButtonNotes[buttonIndex];
+        const velocity = state; // 0=off, 127=on, 1=blinking
+        
+        if (DEBUG) {
+            host.println(`🔵 setClipButtonLED: Button ${buttonIndex + 1}, Note ${note}, Velocity ${velocity}, Channel ${OUTPUT_MIDI_CHANNEL + 1}`);
+        }
+        
+        // Always use Note On (0x90) with velocity for LED state
+        midiOut.sendMidi(0x90 + OUTPUT_MIDI_CHANNEL, note, velocity);
+    }
+}
+
+// LED update functions removed - now using proper observers for real-time feedback
 
 function setupTracks() {
     if (DEBUG) {
-        host.println("=== Setting up Track Management (Track Bank + Device Bank Approach) ===");
+        host.println("Setting up track management...");
     }
     
     try {
@@ -504,8 +654,16 @@ function setupTracks() {
         trackBank = host.createTrackBank(8, 0, 0, false);
         pinnedGroupTrack = trackBank.getTrack(PINNED_GROUP_TRACK_INDEX);
         
+        // Mark all tracks as interested for clip launcher access (must be done during init)
+        for (let i = 0; i < 8; i++) {
+            const track = trackBank.getTrack(i);
+            if (track) {
+                track.exists().markInterested();
+            }
+        }
+        
         // Create child track bank from the group track
-        childTrackBank = pinnedGroupTrack.createTrackBank(8, 0, 0, false);
+        childTrackBank = pinnedGroupTrack.createTrackBank(8, 0, 4, false); // Enable 4 scenes for clip launching
         childTrack0 = childTrackBank.getTrack(0);
         childTrack1 = childTrackBank.getTrack(1);
         
@@ -514,15 +672,7 @@ function setupTracks() {
         childTrack1DeviceBank = childTrack1.createDeviceBank(8);
         
         if (DEBUG) {
-            host.println("Created track banks and device banks (no cursor tracks)");
-        }
-        
-        if (DEBUG) {
-            host.println("=== Setup Complete - Controller Ready ===");
-        }
-        
-        if (DEBUG) {
-            host.println("Track bank and device bank setup complete");
+            host.println("Track banks and device banks created");
         }
         
         
@@ -532,9 +682,8 @@ function setupTracks() {
         // Setup Remote Control Pages
         setupRemoteControlPages();
         
-        if (DEBUG) {
-            host.println("Track management setup complete");
-        }
+        // Setup Clip Launcher Slot Banks
+        setupClipLauncherSlotBanks();
         
         // Log final track status after a brief delay to allow observers to initialize
         host.scheduleTask(logTrackStatus, null, 100);
@@ -613,9 +762,9 @@ function setupTrackObservers() {
 
 function setupRemoteControlPages() {
     try {
-        if (DEBUG) {
-            host.println("=== Setting up Remote Control Pages ===");
-        }
+    if (DEBUG) {
+        host.println("Setting up remote control pages...");
+    }
         
         // Setup Group Track Remote Control Page 4 (for fader) using pinned group track
         if (pinnedGroupTrack) {
@@ -710,8 +859,8 @@ function setupChildTrackRemotePages() {
         
         // Setup parameter observers for all child track device pages
         setupChildTrackParameterObservers();
-        
-        if (DEBUG) {
+    
+    if (DEBUG) {
             host.println("Child track device remote control pages setup complete");
         }
         
@@ -763,6 +912,140 @@ function setupChildTrackParameterObservers() {
     });
 }
 
+function setupClipLauncherSlotBanks() {
+    if (DEBUG) {
+        host.println("Setting up clip launcher slot banks...");
+    }
+    
+    try {
+        
+        // Use Child Track 0 (already exists from group track)
+        if (childTrack0) {
+            try {
+                const clipSlots0 = childTrack0.clipLauncherSlotBank();
+                if (clipSlots0) {
+                    childTrack0ClipLauncherSlotBank = clipSlots0;
+                    if (DEBUG) {
+                        host.println("🎯 Adding LED observers for Child Track 0 clips...");
+                    }
+                    // Mark clip slot properties as interested and add observers for LED feedback
+                    for (let i = 0; i < 4; i++) {
+                        const slot = clipSlots0.getItemAt(i);
+                        if (slot) {
+                            slot.hasContent().markInterested();
+                            slot.isPlaying().markInterested();
+                            
+                            // Add observers for LED feedback
+                            const buttonIndex = i; // Direct mapping: slot 0 -> button 0, etc.
+                            
+                            if (DEBUG) {
+                                host.println(`📋 Adding isPlaying observer for Child Track 0 Slot ${i} -> Button ${buttonIndex + 1}`);
+                            }
+                            
+                            slot.isPlaying().addValueObserver((isPlaying) => {
+                                if (DEBUG) {
+                                    host.println(`🔥 Child Track 0 Slot ${i} isPlaying changed: ${isPlaying}`);
+                                }
+                                if (isPlaying) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.ON);
+                                    if (DEBUG) {
+                                        host.println(`Setting button ${buttonIndex + 1} LED ON`);
+                                    }
+                                } else if (slot.hasContent().get()) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                    if (DEBUG) {
+                                        host.println(`Setting button ${buttonIndex + 1} LED OFF (has content but not playing)`);
+                                    }
+                                } else {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                    if (DEBUG) {
+                                        host.println(`Setting button ${buttonIndex + 1} LED OFF (no content)`);
+                                    }
+                                }
+                            });
+                            
+                            slot.hasContent().addValueObserver((hasContent) => {
+                                if (!hasContent) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else if (!slot.isPlaying().get()) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    if (DEBUG) {
+                        host.println("❌ Child Track 0 has no clip launcher slot bank");
+                    }
+                }
+            } catch (error) {
+                if (DEBUG) {
+                    host.println(`Child Track 0 error: ${error}`);
+                }
+            }
+        }
+        
+        // Use Child Track 1 (already exists from group track)
+        if (childTrack1) {
+            try {
+                const clipSlots1 = childTrack1.clipLauncherSlotBank();
+                if (clipSlots1) {
+                    childTrack1ClipLauncherSlotBank = clipSlots1;
+                    if (DEBUG) {
+                        host.println("🎯 Adding LED observers for Child Track 1 clips...");
+                    }
+                    // Mark clip slot properties as interested and add observers for LED feedback
+                    for (let i = 0; i < 4; i++) {
+                        const slot = clipSlots1.getItemAt(i);
+                        if (slot) {
+                            slot.hasContent().markInterested();
+                            slot.isPlaying().markInterested();
+                            
+                            // Add observers for LED feedback
+                            const buttonIndex = i + 4; // Map to buttons 4-7: slot 0 -> button 4, etc.
+                            
+                            slot.isPlaying().addValueObserver((isPlaying) => {
+                                if (isPlaying) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.ON);
+                                } else if (slot.hasContent().get()) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                }
+                            });
+                            
+                            slot.hasContent().addValueObserver((hasContent) => {
+                                if (!hasContent) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else if (!slot.isPlaying().get()) {
+                                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                                }
+                            });
+                        }
+                    }
+    } else {
+                    if (DEBUG) {
+                        host.println("❌ Child Track 1 has no clip launcher slot bank");
+                    }
+                }
+            } catch (error) {
+                if (DEBUG) {
+                    host.println(`Child Track 1 error: ${error}`);
+                }
+            }
+        }
+        
+        if (DEBUG) {
+            host.println(`Clip launcher setup complete: Track 0=${childTrack0ClipLauncherSlotBank ? 'OK' : 'FAILED'}, Track 1=${childTrack1ClipLauncherSlotBank ? 'OK' : 'FAILED'}`);
+        }
+        
+    } catch (error) {
+        if (DEBUG) {
+            host.println(`FATAL ERROR in setupClipLauncherSlotBanks: ${error}`);
+        }
+    }
+}
+
 function setupChainSelectorObservers() {
     try {
         if (DEBUG) {
@@ -785,12 +1068,18 @@ function setupChainSelectorObservers() {
                 if (DEBUG) {
                     host.println(`Child Track 0 active chain index: ${index}`);
                 }
+                // Update instrument button LEDs for Child Track 0
+                const chainCount = childTrack0ChainSelector.chainCount().get();
+                updateChildTrack0InstrumentLEDs(index, chainCount);
             });
             
             childTrack0ChainSelector.chainCount().addValueObserver(function(count) {
                 if (DEBUG) {
                     host.println(`Child Track 0 chain count: ${count}`);
                 }
+                // Update instrument button LEDs when chain count changes
+                const activeIndex = childTrack0ChainSelector.activeChainIndex().get();
+                updateChildTrack0InstrumentLEDs(activeIndex, count);
             });
         }
         
@@ -810,12 +1099,18 @@ function setupChainSelectorObservers() {
                 if (DEBUG) {
                     host.println(`Child Track 1 active chain index: ${index}`);
                 }
+                // Update instrument button LEDs for Child Track 1
+                const chainCount = childTrack1ChainSelector.chainCount().get();
+                updateChildTrack1InstrumentLEDs(index, chainCount);
             });
             
             childTrack1ChainSelector.chainCount().addValueObserver(function(count) {
                 if (DEBUG) {
                     host.println(`Child Track 1 chain count: ${count}`);
                 }
+                // Update instrument button LEDs when chain count changes
+                const activeIndex = childTrack1ChainSelector.activeChainIndex().get();
+                updateChildTrack1InstrumentLEDs(activeIndex, count);
             });
         }
         
