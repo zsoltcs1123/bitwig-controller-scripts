@@ -1,173 +1,177 @@
-# Behringer X-Touch Mini - MC Mode Controller Script
+# X-Touch Mini Dual MC Mode Controller Script
 
-## Overview
+A comprehensive Bitwig Studio controller script for the Behringer X-Touch Mini in MC (Mackie Control) mode, implementing dual child track control with advanced layer switching functionality.
 
-This is a Bitwig Studio 6 controller script for the Behringer X-Touch Mini USB controller running in **MC (Mackie Control) Mode**. This script provides dual-layer functionality with full hardware LED control and support for multiple controller instances.
+## 🎛️ Features
 
-## Files
+### **Dual Child Track Control**
+- **Child Track 0**: Controlled via encoders 1-4, upper buttons 1-4, lower buttons 1-4
+- **Child Track 1**: Controlled via encoders 5-8, upper buttons 5-8, lower buttons 5-8
+- **Independent Layer System**: Layer A and Layer B can be active simultaneously
 
-- **`xtm-dual.control.js`** - MC Mode controller script with dual-layer support
-- **`package.json`** - Controller metadata for Bitwig Studio
-- **`create-multiple-controllers.ps1`** - PowerShell script for creating multiple controller instances
+### **Control Mapping**
 
-## Controller Script Features
+#### **Normal Operation (No Layers Active)**
+- **Encoders 1-4**: Child Track 0 Primary Device Page 0 parameters
+- **Encoders 5-8**: Child Track 1 Primary Device Page 0 parameters
+- **Upper Buttons 1-4**: Child Track 0 instrument chain selection
+- **Upper Buttons 5-8**: Child Track 1 instrument chain selection
+- **Lower Buttons 1-4**: Child Track 0 clip launcher (slots 0-3)
+- **Lower Buttons 5-8**: Child Track 1 clip launcher (slots 0-3)
+- **Fader**: Group track parameter tagged with 'fader'
 
-### ✅ **Dual-Layer Functionality**
-- **Layer A & Layer B** switching via dedicated hardware buttons
-- **18 Total Controls** per layer (8 encoders + 8 upper buttons + 8 lower buttons + fader)
-- **Full LED Feedback** for visual status indication
+#### **Layer A Active (Layer A Button ON)**
+- **Encoders 1-4**: Still control Child Track 0 Primary Device Page 0
+- **Upper Buttons 1-4**: Child Track 0 mute parameters 0-3 (tagged with 'mutes')
+- **Lower Buttons 1-4**: Child Track 0 mute parameters 4-7 (tagged with 'mutes')
+- **Other controls**: Unchanged
 
-### ✅ **Hardware Support**
-- **8 Push Encoders** with LED rings
-- **16 Buttons** (2 rows of 8) with LED backlights  
-- **1 Fader** (60mm)
-- **2 Layer Buttons** (A/B) - Hardware layer switching
-- **Complete LED Control** - Full hardware LED feedback
+#### **Layer B Active (Layer B Button ON)**
+- **Encoders 5-8**: Still control Child Track 1 Primary Device Page 0
+- **Upper Buttons 5-8**: Child Track 1 mute parameters 0-3 (tagged with 'mutes')
+- **Lower Buttons 5-8**: Child Track 1 mute parameters 4-7 (tagged with 'mutes')
+- **Other controls**: Unchanged
 
-## Setup Instructions
+### **LED Feedback**
+- **Real-time parameter feedback**: LED rings show encoder parameter values
+- **Instrument selection feedback**: Upper button LEDs show active instrument chains
+- **Clip launcher feedback**: Lower button LEDs show clip states (playing/stopped)
+- **Layer mode feedback**: Button LEDs switch to show mute parameter states when layers are active
+- **Layer button indicators**: Layer A and Layer B buttons light up when active
 
-### 1. Hardware Configuration
+## 🔧 Hardware Setup
 
-**IMPORTANT:** This controller script requires **MC (Mackie Control) Mode** for full functionality including hardware layer switching.
+### **X-Touch Mini Configuration**
+1. Set the X-Touch Mini to **MC Mode** (Mackie Control)
+2. Use **Channel 1** for MIDI communication
+3. **Fader Channel**: Channel 9 (for pitch bend messages)
 
-#### Setting MC Mode:
-1. Open the **X-Touch Editor** software
-2. Set **Mode** to **MC** (Mackie Control)
-3. Click **"To Hardware"** to upload the configuration
-4. The **MC MODE LED** on the controller should be ON
+### **MIDI Configuration**
+- **Input MIDI Channel**: 0 (Channel 1)
+- **Fader MIDI Channel**: 8 (Channel 9) 
+- **Output MIDI Channel**: 0 (Channel 1)
+- **LED Global Channel**: 0 (Channel 1)
 
-#### Why MC Mode?
-- ✅ **Hardware layer buttons** (A/B) send MIDI and work natively
-- ✅ **Complete LED control** with hardware feedback
-- ✅ **Mackie Control protocol** for professional DAW integration
-- ✅ **Fixed MIDI channels** for consistent behavior
+## 🎯 Bitwig Studio Setup
 
-### 2. Bitwig Configuration
+### **Track Structure**
+1. **Group Track**: Main parent track (pinned to track index 0)
+2. **Child Track 0**: First child track within the group
+3. **Child Track 1**: Second child track within the group
 
-1. **Add Controller** in Bitwig Settings → Controllers
-2. **Select:** "Behringer X-Touch Mini Dual MC - Controller 1"
-3. **Configure MIDI Ports** to match your X-Touch Mini
-4. **Test all controls** - check console for debug output
-5. **Verify layer buttons** work for A/B switching
+### **Parameter Tagging (CRITICAL)**
+For the advanced functionality to work, you must tag your device parameters in Bitwig:
 
-### 3. MIDI Channel Information
+#### **Mute Parameters**
+- Tag parameters you want to control with Layer A/B as **'mutes'**
+- Parameters 0-3 will map to upper buttons
+- Parameters 4-7 will map to lower buttons
 
-**MC Mode Fixed Channels:**
-- **Primary Controls:** Channel 1 (encoders, buttons, layer switches)
-- **Fader:** Channel 9 (pitch bend)
-- **LED Output:** Channel 1
+#### **Fader Parameter**
+- Tag the parameter you want the fader to control as **'fader'**
 
-**Note:** These channels are fixed by the Mackie Control protocol and cannot be changed via hardware settings.
+### **How to Tag Parameters in Bitwig**
+1. Right-click on a device parameter
+2. Select "Configure Remote Control"
+3. In the remote control page, add tags to parameters
+4. Use exactly **'mutes'** for mute controls and **'fader'** for fader control
 
-## Multiple Controller Support
+## 🚀 Installation
 
-### The Challenge
+1. Copy `xtm-dual.control.js` to your Bitwig Controller Scripts directory:
+   - **Windows**: `%USERPROFILE%/Documents/Bitwig Studio/Controller Scripts/`
+   - **macOS**: `~/Documents/Bitwig Studio/Controller Scripts/`
+   - **Linux**: `~/Bitwig Studio/Controller Scripts/`
 
-All X-Touch Mini controllers in MC mode transmit on the **same MIDI channels** (1 & 9). This creates conflicts when using multiple controllers simultaneously.
+2. In Bitwig Studio:
+   - Go to **Settings → Controllers**
+   - Click **Add controller**
+   - Select **Behringer → X-Touch Mini Dual 6 MC Mode**
+   - Configure MIDI input/output to your X-Touch Mini
 
-### Solution: Virtual MIDI Routing
+## 🔍 Key Technical Findings
 
-To use multiple X-Touch Mini controllers, you need **MIDI routing software** to separate them onto different channels:
+### **Bitwig API Discoveries**
 
-#### Recommended MIDI Routing Software:
-- **Windows:** loopMIDI + MIDI-OX, Bome MIDI Translator Pro
-- **macOS:** MIDI Patchbay, SoundDesk  
-- **Cross-Platform:** rtpMIDI, QjackCtl
+#### **Remote Control Page Issue**
+**Problem**: Using `selectedPageIndex().set()` to access different pages results in both references pointing to the same page.
 
-#### Example Setup (3 Controllers):
+**Solution**: Use `createCursorRemoteControlsPage()` with filter expressions:
+```javascript
+// Instead of this (broken):
+page1 = device.createCursorRemoteControlsPage("Page1", 8, null);
+page1.selectedPageIndex().set(1);
+
+// Use this (working):
+page1 = device.createCursorRemoteControlsPage("Page1", 8, "mutes");
 ```
-Physical Controller 1 → Virtual Port 1 → Channels 1,9   (Script: Controller 1)
-Physical Controller 2 → Virtual Port 2 → Channels 2,10  (Script: Controller 2)  
-Physical Controller 3 → Virtual Port 3 → Channels 3,11  (Script: Controller 3)
+
+#### **Parameter Toggle Method**
+**Problem**: There is no `param.toggle()` method in the Bitwig API.
+
+**Solution**: Manual toggle implementation:
+```javascript
+const currentValue = param.value().get();
+const newValue = currentValue > 0 ? 0 : 127;
+param.value().set(newValue, 128);
 ```
 
-### Creating Multiple Script Instances
+#### **Fader Scaling**
+**Problem**: Incorrect pitch bend to parameter conversion.
 
-Use the provided PowerShell script to generate multiple controller versions:
-
-```powershell
-# Run from this directory (xtm-dual-mc)
-powershell -ExecutionPolicy Bypass -File "create-multiple-controllers.ps1" -NumControllers 3
+**Solution**: Proper 14-bit to normalized conversion:
+```javascript
+const pitchBendValue = (msb << 7) | lsb;  // 0-16383
+const normalizedValue = pitchBendValue / 16383.0;  // 0.0-1.0
+param.set(normalizedValue);  // No resolution parameter for smooth control
 ```
 
-This creates:
-- `xtm-dual-mc/` - Controller 1 (Channels 1,9) - Original
-- `xtm-dual-mc-2/` - Controller 2 (Channels 2,10) - Generated
-- `xtm-dual-mc-3/` - Controller 3 (Channels 3,11) - Generated
+### **Hardware Discoveries**
 
-Each script has unique names and UUIDs for Bitwig recognition.
+#### **MC Mode LED Control**
+- Uses **Mackie Control Universal** protocol
+- LED rings: CC48-55 with Fan mode (value + 32)
+- Button LEDs: Note On messages with velocity as state
+- **Velocity 0**: OFF, **Velocity 127**: ON, **Velocity 1**: BLINKING
 
-## MIDI Implementation
+#### **MIDI Message Patterns**
+- **Encoders**: CC16-23 with relative values (1-63 clockwise, 65-127 counter-clockwise)
+- **Buttons**: Non-sequential note numbers (mixed pattern)
+- **Fader**: 14-bit pitch bend on Channel 9
 
-### Complete Reference
+## 🐛 Debugging
 
-For detailed MIDI implementation documentation, see the parent directory's reference files:
-- `../x-touch-mini-midi-reference.md` - Complete MIDI mappings and LED control
-- `../x-touch quick start.md` - Official Behringer documentation
+Set `DEBUG = true` in the script to enable detailed logging. The script will output:
+- MIDI message details
+- Parameter changes
+- Layer state changes
+- LED updates
+- Error conditions
 
-### Quick Reference (MC Mode)
+## 📝 Development Notes
 
-| Control | MIDI Channel | Type | Range | Notes |
-|---------|--------------|------|-------|-------|
-| Encoders 1-8 (Turn) | 1 | CC16-23 | 0-127 | Relative/Absolute |
-| Encoders 1-8 (Push) | 1 | Note 32-39 | 0-127 | Momentary |
-| Upper Buttons 1-8 | 1 | Note 89,90,40-45 | 0-127 | Non-sequential |
-| Lower Buttons 1-8 | 1 | Note 87,88,91-95 | 0-127 | Non-sequential |
-| Layer A Button | 1 | Note 84 | 0-127 | Available in MC Mode |
-| Layer B Button | 1 | Note 85 | 0-127 | Available in MC Mode |
-| Fader | 9 | Pitch Bend | 0-16383 | 14-bit resolution |
+### **Code Structure**
+- **Modular design**: Separate functions for each control type
+- **Layer management**: Independent Layer A and Layer B systems  
+- **LED feedback**: Real-time updates with automatic switching
+- **Error handling**: Graceful degradation when hardware/tracks unavailable
 
-## Troubleshooting
+### **Performance Optimizations**
+- **Streamlined logging**: Concise debug messages for production use
+- **Efficient LED updates**: Only update when values change
+- **Smart observers**: Conditional LED updates based on layer state
 
-### Controller Not Detected
-- ✅ Ensure X-Touch Mini is in **MC Mode** (MC LED should be ON)
-- ✅ Restart Bitwig after script installation
-- ✅ Verify MIDI ports in Bitwig controller settings
-- ✅ Check USB connection and driver installation
+## 🤝 Contributing
 
-### Layer Buttons Not Working
-- ✅ Confirm controller is in **MC Mode** (not Standard Mode)
-- ✅ Verify Layer A/B buttons are mapped correctly in script
-- ✅ Check MIDI monitor for Note 84 (Layer A) and Note 85 (Layer B)
+This script demonstrates advanced Bitwig API usage and hardware integration. Key learnings can be applied to other controller development projects.
 
-### Multiple Controllers Conflict
-- ❌ All X-Touch Mini controllers in MC Mode use the same MIDI channels
-- ✅ Use MIDI routing software to separate controllers onto different channels
-- ✅ Create multiple script instances with `create-multiple-controllers.ps1`
-- ✅ Configure virtual MIDI ports for each physical controller
+## 📄 License
 
-### LED Control Issues
-- ✅ MC Mode provides automatic LED feedback for many controls
-- ✅ Custom LED control requires proper MIDI channel 1 output
-- ✅ Some LEDs are controlled directly by hardware in MC Mode
-
-## Development
-
-### Script Structure
-- **MC Mode optimized** for maximum hardware integration
-- **Dual-layer architecture** with hardware A/B button support
-- **Modular design** - easy to customize for different use cases
-- **Comprehensive debugging** - enable with `DEBUG = true`
-
-### Customization
-- Modify MIDI channel constants for multiple controller support
-- Extend functionality in control handler functions
-- LED control functions available for custom visual feedback
-- Hardware layer switching can be extended for more complex workflows
-
-## Version History
-
-- **v1.0.0** - MC Mode implementation with dual-layer hardware support
-- **v0.1.0** - Initial development and hardware testing
-- Multiple controller support framework with PowerShell automation
-
-## License
-
-Created for Bitwig Studio 6 controller scripting. Free to use and modify.
+This controller script is provided as-is for educational and practical use with Bitwig Studio and the Behringer X-Touch Mini.
 
 ---
 
-**Author:** Zsolt  
-**Bitwig API:** Version 25  
-**Hardware:** Behringer X-Touch Mini (Firmware 1.10)  
-**Editor:** X-Touch Editor v1.21
+**Version**: 1.0  
+**Bitwig API**: v25  
+**Hardware**: Behringer X-Touch Mini (MC Mode)  
+**Author**: Zsolt

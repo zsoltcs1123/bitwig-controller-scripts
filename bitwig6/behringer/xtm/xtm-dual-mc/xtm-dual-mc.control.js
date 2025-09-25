@@ -89,7 +89,8 @@ const LAYER = {
 
 // Global Variables
 let midiIn, midiOut;
-let currentLayer = LAYER.A; // Track current layer (Layer A only for now)
+let layerAActive = false;  // Controls Child Track 0 Remote Page 1
+let layerBActive = false;  // Controls Child Track 1 Remote Page 1
 
 // Track Management - Track Bank + Device Bank approach
 let trackBank;
@@ -102,11 +103,12 @@ let childTrack1DeviceBank;
 
 // Remote Control Pages
 let groupTrackRemotePage4;
+let groupTrackFaderPage;
 
 // Primary Device Controls for Child Tracks
 let childTrack0PrimaryDevice, childTrack1PrimaryDevice;
-let childTrack0PrimaryDevicePage0, childTrack0PrimaryDevicePage1, childTrack0PrimaryDevicePage2;
-let childTrack1PrimaryDevicePage0, childTrack1PrimaryDevicePage1, childTrack1PrimaryDevicePage2;
+let childTrack0PrimaryDevicePage0, childTrack0PrimaryDevicePage1;
+let childTrack1PrimaryDevicePage0, childTrack1PrimaryDevicePage1;
 
 // Instrument Selector Controls
 // Upper buttons 1-4 select instruments on Child Track 0 (chains 0-3)
@@ -132,8 +134,8 @@ function init() {
     // Initialize LED rings to Single mode
     initializeLEDRings();
     
-    // Initialize layer buttons - set Layer A as active by default
-    setLayerLED('A', LED_STATE.ON);
+    // Initialize layer buttons - both off by default (normal operation)
+    setLayerLED('A', LED_STATE.OFF);
     setLayerLED('B', LED_STATE.OFF);
     
     // Initialize instrument button LEDs (will be updated by observers)
@@ -143,8 +145,8 @@ function init() {
     initializeClipButtonLEDs();
     
     if (DEBUG) {
-        host.println("X-Touch Mini Dual (MC Mode) initialized - Layer A functionality enabled");
-        host.println(`Current layer: ${currentLayer}`);
+        host.println("X-Touch Mini Dual (MC Mode) initialized - Independent layer system enabled");
+        host.println(`Layer A: ${layerAActive ? 'ON' : 'OFF'} (Child Track 0 Remote Page 1), Layer B: ${layerBActive ? 'ON' : 'OFF'} (Child Track 1 Remote Page 1)`);
     }
 }
 
@@ -182,7 +184,7 @@ function onMidi(status, data1, data2) {
 }
 
 function handleControlChange(cc, value) {
-    // Handle Encoders (CC16-CC23) - Layer A functionality only
+    // Handle Encoders (CC16-CC23)
     if (cc >= CC.ENCODER_1 && cc <= CC.ENCODER_8) {
         const encoderIndex = cc - CC.ENCODER_1;
         handleEncoderTurn(encoderIndex, value, LAYER.A);
@@ -195,14 +197,14 @@ function handleControlChange(cc, value) {
 }
 
 function handleNote(note, isPressed, velocity) {
-    // Handle Encoder Pushes (Notes 32-39) - Layer A functionality only
+    // Handle Encoder Pushes (Notes 32-39)
     if (note >= NOTE.ENCODER_PUSH_1 && note <= NOTE.ENCODER_PUSH_8) {
         const encoderIndex = note - NOTE.ENCODER_PUSH_1;
         handleEncoderPush(encoderIndex, isPressed, LAYER.A);
         return;
     }
     
-    // Handle Upper Row Buttons (non-sequential notes) - Layer A functionality only
+    // Handle Upper Row Buttons (non-sequential notes)
     const upperButtons = [NOTE.BUTTON_UPPER_1, NOTE.BUTTON_UPPER_2, NOTE.BUTTON_UPPER_3, NOTE.BUTTON_UPPER_4,
                          NOTE.BUTTON_UPPER_5, NOTE.BUTTON_UPPER_6, NOTE.BUTTON_UPPER_7, NOTE.BUTTON_UPPER_8];
     const upperIndex = upperButtons.indexOf(note);
@@ -211,7 +213,7 @@ function handleNote(note, isPressed, velocity) {
         return;
     }
     
-    // Handle Lower Row Buttons (non-sequential notes) - Layer A functionality only
+    // Handle Lower Row Buttons (non-sequential notes)
     const lowerButtons = [NOTE.BUTTON_LOWER_1, NOTE.BUTTON_LOWER_2, NOTE.BUTTON_LOWER_3, NOTE.BUTTON_LOWER_4,
                          NOTE.BUTTON_LOWER_5, NOTE.BUTTON_LOWER_6, NOTE.BUTTON_LOWER_7, NOTE.BUTTON_LOWER_8];
     const lowerIndex = lowerButtons.indexOf(note);
@@ -254,7 +256,7 @@ function handleEncoderTurn(encoderIndex, value, layer) {
         return; // No change for value 64 or 0
     }
     
-    // Encoders 1-4 (index 0-3) control Child Track 0 Primary Device Page 0
+    // Encoders 1-4 (index 0-3) always control Child Track 0 Primary Device Page 0
     if (encoderIndex >= 0 && encoderIndex <= 3) {
         if (childTrack0PrimaryDevicePage0) {
             const param = childTrack0PrimaryDevicePage0.getParameter(encoderIndex);
@@ -264,8 +266,12 @@ function handleEncoderTurn(encoderIndex, value, layer) {
                 
                 // Update LED ring to show current parameter value
                 updateEncoderLEDRing(encoderIndex, param.get());
+                
+                if (DEBUG && Math.random() < 0.1) { // Only log occasionally to avoid spam
+                    host.println(`🔵 ENCODER ${encoderIndex + 1} - Page 0 Parameter: ${param.name().get()} = ${param.get()}`);
+                }
             } catch (error) {
-    if (DEBUG) {
+                if (DEBUG) {
                     host.println(`Error incrementing Child Track 0 Primary Device Parameter ${encoderIndex}: ${error}`);
                 }
             }
@@ -301,11 +307,7 @@ function handleEncoderTurn(encoderIndex, value, layer) {
 }
 
 function handleEncoderPush(encoderIndex, isPressed, layer) {
-    if (DEBUG) {
-        host.println(`Layer ${layer} - Encoder ${encoderIndex + 1} ${isPressed ? 'pressed' : 'released'}`);
-    }
-    
-    // Just log for now - no functionality
+    // Encoder push functionality can be implemented here if needed in the future
 }
 
 function handleUpperButton(buttonIndex, isPressed, layer) {
@@ -318,35 +320,76 @@ function handleUpperButton(buttonIndex, isPressed, layer) {
         return;
     }
     
-    // Upper buttons 1-4 (index 0-3) control Child Track 0 instrument selection
+    // Upper buttons 1-4 (index 0-3)
     if (buttonIndex >= 0 && buttonIndex <= 3) {
-        const chainIndex = buttonIndex; // Direct mapping: button 1 -> chain 0, button 2 -> chain 1, etc.
-        
-        if (canSelectInstrumentOnChildTrack0()) {
-            selectInstrumentOnChildTrack0(chainIndex);
-            // LED update will be triggered by the chain selector observer
+        if (layerAActive) {
+            // Layer A active: buttons control Child Track 0 Remote Page 1 parameters (encoders still control Page 0)
+            // Access Device Page 1 (mutes) directly - no page switching needed
+            if (childTrack0PrimaryDevicePage1 && childTrack0PrimaryDevicePage1.getParameter(buttonIndex).exists().get()) {
+                const param = childTrack0PrimaryDevicePage1.getParameter(buttonIndex);
+                // Toggle mute parameter
+                const currentValue = param.value().get();
+                const newValue = currentValue > 0 ? 0 : 127;
+                param.value().set(newValue, 128);
+                if (DEBUG) {
+                    host.println(`🔴 Layer A - Toggled upper button ${buttonIndex + 1}: ${param.name().get()} = ${newValue}`);
+                }
+            } else {
+                if (DEBUG) {
+                    host.println(`❌ Child Track 0 Page 1 Parameter ${buttonIndex} (Layer A) not available`);
+                }
+            }
         } else {
-            if (DEBUG) {
-                host.println(`Upper button ${buttonIndex + 1} pressed but child track 0 instrument selector not available`);
+            // Normal operation: instrument chain selection on Child Track 0
+            const chainIndex = buttonIndex; // Direct mapping: button 1 -> chain 0, button 2 -> chain 1, etc.
+            
+            if (canSelectInstrumentOnChildTrack0()) {
+                selectInstrumentOnChildTrack0(chainIndex);
+                // LED update will be triggered by the chain selector observer
+        } else {
+    if (DEBUG) {
+                    host.println(`Upper button ${buttonIndex + 1} pressed but child track 0 instrument selector not available`);
+                }
             }
         }
         return;
     }
     
-    // Upper buttons 5-8 (index 4-7) control Child Track 1 instrument selection
+    // Upper buttons 5-8 (index 4-7)
     if (buttonIndex >= 4 && buttonIndex <= 7) {
-        const chainIndex = buttonIndex - 4; // Map to 0-3 range: button 5 -> chain 0, button 6 -> chain 1, etc.
-        
-        if (canSelectInstrumentOnChildTrack1()) {
-            selectInstrumentOnChildTrack1(chainIndex);
-            // LED update will be triggered by the chain selector observer
+        const paramIndex = buttonIndex - 4; // Convert to 0-3 range
+        if (layerBActive) {
+            // Layer B active: buttons control Child Track 1 Remote Page 1 parameters (encoders still control Page 0)
+            // Access Device Page 1 (mutes) directly - no page switching needed
+            if (childTrack1PrimaryDevicePage1 && childTrack1PrimaryDevicePage1.getParameter(paramIndex).exists().get()) {
+                const param = childTrack1PrimaryDevicePage1.getParameter(paramIndex);
+                // Toggle mute parameter
+                const currentValue = param.value().get();
+                const newValue = currentValue > 0 ? 0 : 127;
+                param.value().set(newValue, 128);
+                if (DEBUG) {
+                    host.println(`🔴 Layer B - Toggled upper button ${buttonIndex + 1}: ${param.name().get()} = ${newValue}`);
+                }
+            } else {
+                if (DEBUG) {
+                    host.println(`❌ Child Track 1 Page 1 Parameter ${paramIndex} (Layer B) not available`);
+                }
+            }
     } else {
-            if (DEBUG) {
-                host.println(`Upper button ${buttonIndex + 1} pressed but child track 1 instrument selector not available`);
-    }
+            // Normal operation: instrument chain selection on Child Track 1
+            const chainIndex = buttonIndex - 4; // Map to 0-3 range: button 5 -> chain 0, button 6 -> chain 1, etc.
+            
+            if (canSelectInstrumentOnChildTrack1()) {
+                selectInstrumentOnChildTrack1(chainIndex);
+                // LED update will be triggered by the chain selector observer
+            } else {
+                if (DEBUG) {
+                    host.println(`Upper button ${buttonIndex + 1} pressed but child track 1 instrument selector not available`);
+                }
+            }
         }
         return;
-}
+    }
 
     if (DEBUG) {
         host.println(`Upper button ${buttonIndex + 1} - no functionality mapped`);
@@ -363,51 +406,90 @@ function handleLowerButton(buttonIndex, isPressed, layer) {
         return;
     }
     
-    // Lower buttons 1-4 (index 0-3) launch clips on Child Track 0
+    // Lower buttons 1-4 (index 0-3)
     if (buttonIndex >= 0 && buttonIndex <= 3) {
-        const slotIndex = buttonIndex; // Direct mapping: button 1 -> slot 0, button 2 -> slot 1, etc.
-        
-        if (childTrack0ClipLauncherSlotBank && childTrack0 && childTrack0.exists().get()) {
-            // Launch individual clip slot (not scene)
-            const clipSlot = childTrack0ClipLauncherSlotBank.getItemAt(slotIndex);
-            if (clipSlot) {
+        if (layerAActive) {
+            // Layer A active: buttons control Child Track 0 Remote Page 1 parameters 4-7 (second row of mutes)
+            if (childTrack0PrimaryDevicePage1 && childTrack0PrimaryDevicePage1.getParameter(buttonIndex + 4).exists().get()) {
+                const param = childTrack0PrimaryDevicePage1.getParameter(buttonIndex + 4); // Parameters 4-7
+                // Toggle mute parameter
+                const currentValue = param.value().get();
+                const newValue = currentValue > 0 ? 0 : 127;
+                param.value().set(newValue, 128);
                 if (DEBUG) {
-                    host.println(`Launching clip slot ${slotIndex} on Child Track 0`);
+                    host.println(`🔴 Layer A - Toggled lower button ${buttonIndex + 1}: ${param.name().get()} = ${newValue}`);
                 }
-                clipSlot.launch();
-    } else {
+            } else {
                 if (DEBUG) {
-                    host.println(`❌ Child Track 0 clip slot ${slotIndex} does not exist`);
+                    host.println(`❌ Child Track 0 Page 1 Parameter ${buttonIndex + 4} (Layer A lower button) not available`);
                 }
             }
         } else {
+            // Normal operation: launch clips on Child Track 0
+            const slotIndex = buttonIndex; // Direct mapping: button 1 -> slot 0, button 2 -> slot 1, etc.
+            
+            if (childTrack0ClipLauncherSlotBank && childTrack0 && childTrack0.exists().get()) {
+                // Launch individual clip slot (not scene)
+                const clipSlot = childTrack0ClipLauncherSlotBank.getItemAt(slotIndex);
+                if (clipSlot) {
+                    if (DEBUG) {
+                        host.println(`Launching clip slot ${slotIndex} on Child Track 0`);
+                    }
+                    clipSlot.launch();
+                } else {
+                    if (DEBUG) {
+                        host.println(`❌ Child Track 0 clip slot ${slotIndex} does not exist`);
+                    }
+                }
+            } else {
     if (DEBUG) {
-                host.println(`❌ Lower button ${buttonIndex + 1} pressed but Child Track 0 clip launcher not available (track exists: ${childTrack0 ? childTrack0.exists().get() : 'no track'}, launcher: ${childTrack0ClipLauncherSlotBank ? 'yes' : 'no'})`);
+                    host.println(`❌ Lower button ${buttonIndex + 1} pressed but Child Track 0 clip launcher not available (track exists: ${childTrack0 ? childTrack0.exists().get() : 'no track'}, launcher: ${childTrack0ClipLauncherSlotBank ? 'yes' : 'no'})`);
+                }
             }
         }
         return;
     }
     
-    // Lower buttons 5-8 (index 4-7) launch clips on Child Track 1
+    // Lower buttons 5-8 (index 4-7)
     if (buttonIndex >= 4 && buttonIndex <= 7) {
-        const slotIndex = buttonIndex - 4; // Map to 0-3 range: button 5 -> slot 0, button 6 -> slot 1, etc.
-        
-        if (childTrack1ClipLauncherSlotBank) {
-            // Launch individual clip slot (not scene)
-            const clipSlot = childTrack1ClipLauncherSlotBank.getItemAt(slotIndex);
-            if (clipSlot) {
+        const paramIndex = buttonIndex - 4; // Convert to 0-3 range
+        if (layerBActive) {
+            // Layer B active: buttons control Child Track 1 Remote Page 1 parameters 4-7 (second row of mutes)
+            if (childTrack1PrimaryDevicePage1 && childTrack1PrimaryDevicePage1.getParameter(paramIndex + 4).exists().get()) {
+                const param = childTrack1PrimaryDevicePage1.getParameter(paramIndex + 4); // Parameters 4-7
+                // Toggle mute parameter
+                const currentValue = param.value().get();
+                const newValue = currentValue > 0 ? 0 : 127;
+                param.value().set(newValue, 128);
                 if (DEBUG) {
-                    host.println(`Launching clip slot ${slotIndex} on Child Track 1`);
+                    host.println(`🔴 Layer B - Toggled lower button ${buttonIndex + 1}: ${param.name().get()} = ${newValue}`);
                 }
-                clipSlot.launch();
             } else {
                 if (DEBUG) {
-                    host.println(`❌ Child Track 1 clip slot ${slotIndex} does not exist`);
+                    host.println(`❌ Child Track 1 Page 1 Parameter ${paramIndex + 4} (Layer B lower button) not available`);
                 }
             }
+        } else {
+            // Normal operation: launch clips on Child Track 1
+            const slotIndex = buttonIndex - 4; // Map to 0-3 range: button 5 -> slot 0, button 6 -> slot 1, etc.
+            
+            if (childTrack1ClipLauncherSlotBank) {
+                // Launch individual clip slot (not scene)
+                const clipSlot = childTrack1ClipLauncherSlotBank.getItemAt(slotIndex);
+                if (clipSlot) {
+                    if (DEBUG) {
+                        host.println(`Launching clip slot ${slotIndex} on Child Track 1`);
+                    }
+                    clipSlot.launch();
+                } else {
+                    if (DEBUG) {
+                        host.println(`❌ Child Track 1 clip slot ${slotIndex} does not exist`);
+                    }
+                }
     } else {
-            if (DEBUG) {
-                host.println(`❌ Lower button ${buttonIndex + 1} pressed but Child Track 1 clip launcher not available (launcher: ${childTrack1ClipLauncherSlotBank ? 'yes' : 'no'})`);
+                if (DEBUG) {
+                    host.println(`❌ Lower button ${buttonIndex + 1} pressed but Child Track 1 clip launcher not available (launcher: ${childTrack1ClipLauncherSlotBank ? 'yes' : 'no'})`);
+                }
             }
         }
         return;
@@ -419,14 +501,36 @@ function handleLowerButton(buttonIndex, isPressed, layer) {
 }
 
 function handleFaderPitchBend(lsb, msb) {
-    // Convert 14-bit pitch bend to 0-127 range
-    const value = Math.floor(((msb << 7) | lsb) / 128);
+    // Convert 14-bit pitch bend to full 14-bit range (0-16383)
+    const pitchBendValue = (msb << 7) | lsb;
+    
+    // Convert 14-bit (0-16383) to normalized 0.0-1.0 range
+    const normalizedValue = pitchBendValue / 16383.0;
     
     if (DEBUG) {
-        host.println(`Layer ${currentLayer} - Fader moved: ${value}`);
+        host.println(`Fader moved: raw=${pitchBendValue} (LSB=${lsb}, MSB=${msb}), normalized=${normalizedValue.toFixed(4)}`);
     }
     
-    // Just log for now - no functionality
+    // Control group track fader page parameter 0
+    if (groupTrackFaderPage) {
+        const param = groupTrackFaderPage.getParameter(0);
+        if (param && param.exists().get()) {
+            // Set parameter with normalized value (no resolution parameter for smoother control)
+            param.set(normalizedValue);
+            
+            if (DEBUG) {
+                host.println(`Fader -> Group track fader page parameter 0: ${normalizedValue.toFixed(4)}`);
+            }
+        } else {
+            if (DEBUG) {
+                host.println(`Fader moved but group track fader page parameter 0 not available`);
+            }
+        }
+    } else {
+        if (DEBUG) {
+            host.println(`Fader moved but group track fader page not available`);
+        }
+    }
 }
 
 function handleLayerButton(layer, isPressed) {
@@ -439,42 +543,28 @@ function handleLayerButton(layer, isPressed) {
         return;
     }
     
-    // Toggle layer logic: mutually exclusive toggles
+    // Independent toggle logic: both layers can be active simultaneously
     if (layer === 'A') {
-        if (currentLayer === LAYER.A) {
-            // Layer A is active, turn it off (no active layer)
-            currentLayer = null;
-            setLayerLED('A', LED_STATE.OFF);
-            setLayerLED('B', LED_STATE.OFF);
-            if (DEBUG) {
-                host.println(`Layer A deactivated - no active layer`);
-        }
-        } else {
-            // Activate Layer A, deactivate Layer B
-            currentLayer = LAYER.A;
-            setLayerLED('A', LED_STATE.ON);
-            setLayerLED('B', LED_STATE.OFF);
-            if (DEBUG) {
-                host.println(`Layer A activated`);
-            }
+        // Toggle Layer A (controls Child Track 0 Remote Page 1)
+        layerAActive = !layerAActive;
+        setLayerLED('A', layerAActive ? LED_STATE.ON : LED_STATE.OFF);
+        
+        // Update LED feedback for upper buttons 1-4
+        updateLayerAButtonLEDs();
+        
+        if (DEBUG) {
+            host.println(`Layer A ${layerAActive ? 'activated' : 'deactivated'} - Child Track 0 Remote Page 1 control`);
         }
     } else if (layer === 'B') {
-        if (currentLayer === LAYER.B) {
-            // Layer B is active, turn it off (no active layer)
-            currentLayer = null;
-            setLayerLED('A', LED_STATE.OFF);
-            setLayerLED('B', LED_STATE.OFF);
-            if (DEBUG) {
-                host.println(`Layer B deactivated - no active layer`);
-            }
-        } else {
-            // Activate Layer B, deactivate Layer A
-            currentLayer = LAYER.B;
-            setLayerLED('A', LED_STATE.OFF);
-            setLayerLED('B', LED_STATE.ON);
-            if (DEBUG) {
-                host.println(`Layer B activated`);
-            }
+        // Toggle Layer B (controls Child Track 1 Remote Page 1)
+        layerBActive = !layerBActive;
+        setLayerLED('B', layerBActive ? LED_STATE.ON : LED_STATE.OFF);
+        
+        // Update LED feedback for upper buttons 5-8
+        updateLayerBButtonLEDs();
+        
+        if (DEBUG) {
+            host.println(`Layer B ${layerBActive ? 'activated' : 'deactivated'} - Child Track 1 Remote Page 1 control`);
         }
     }
 }
@@ -528,6 +618,200 @@ function updateParameterLEDFeedback(pageName, parameterIndex, parameterValue) {
         updateEncoderLEDRing(encoderIndex, parameterValue);
     }
     // Note: We're only handling Page 0 parameters for now since that's what the encoders control
+}
+
+function updateMuteParameterLEDFeedback(pageName, parameterIndex, parameterValue) {
+    // Update button LEDs for mute parameters when in layer mode
+    // Child0PrimaryPage1 (mutes) parameters 0-3 map to upper buttons 1-4, parameters 4-7 map to lower buttons 1-4 when Layer A is active
+    // Child1PrimaryPage1 (mutes) parameters 0-3 map to upper buttons 5-8, parameters 4-7 map to lower buttons 5-8 when Layer B is active
+    
+    if (pageName === "Child0PrimaryPage1" && layerAActive) {
+        if (parameterIndex >= 0 && parameterIndex <= 3) {
+            // Layer A is active - update upper buttons 1-4 (parameters 0-3)
+            const buttonIndex = parameterIndex; // Direct mapping: param 0 -> button 0, etc.
+            const ledState = parameterValue > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+            setInstrumentButtonLED(buttonIndex, ledState);
+            
+            if (DEBUG) {
+                host.println(`🔴 Layer A - Updated upper button ${buttonIndex + 1} LED: ${ledState} (mute value: ${parameterValue})`);
+            }
+        } else if (parameterIndex >= 4 && parameterIndex <= 7) {
+            // Layer A is active - update lower buttons 1-4 (parameters 4-7)
+            const buttonIndex = parameterIndex - 4; // Map param 4-7 to button 0-3
+            const ledState = parameterValue > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+            setClipButtonLED(buttonIndex, ledState); // Lower buttons use clip button LED function
+            
+            if (DEBUG) {
+                host.println(`🔴 Layer A - Updated lower button ${buttonIndex + 1} LED: ${ledState} (mute value: ${parameterValue})`);
+            }
+        }
+    } else if (pageName === "Child1PrimaryPage1" && layerBActive) {
+        if (parameterIndex >= 0 && parameterIndex <= 3) {
+            // Layer B is active - update upper buttons 5-8 (parameters 0-3)
+            const buttonIndex = parameterIndex + 4; // Map to buttons 4-7: param 0 -> button 4, etc.
+            const ledState = parameterValue > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+            setInstrumentButtonLED(buttonIndex, ledState);
+            
+            if (DEBUG) {
+                host.println(`🔴 Layer B - Updated upper button ${buttonIndex + 1} LED: ${ledState} (mute value: ${parameterValue})`);
+            }
+        } else if (parameterIndex >= 4 && parameterIndex <= 7) {
+            // Layer B is active - update lower buttons 5-8 (parameters 4-7)
+            const buttonIndex = parameterIndex; // Map param 4-7 to button 4-7
+            const ledState = parameterValue > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+            setClipButtonLED(buttonIndex, ledState); // Lower buttons use clip button LED function
+            
+            if (DEBUG) {
+                host.println(`🔴 Layer B - Updated lower button ${buttonIndex + 1} LED: ${ledState} (mute value: ${parameterValue})`);
+            }
+        }
+    }
+}
+
+function updateLayerAButtonLEDs() {
+    // Update upper buttons 1-4 and lower buttons 1-4 LEDs based on Layer A state
+    if (layerAActive && childTrack0PrimaryDevicePage1) {
+        // Layer A is active - show mute parameter states
+        // Upper buttons 1-4: parameters 0-3
+        for (let i = 0; i < 4; i++) {
+            const param = childTrack0PrimaryDevicePage1.getParameter(i);
+            if (param && param.exists().get()) {
+                const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                setInstrumentButtonLED(i, ledState);
+            } else {
+                setInstrumentButtonLED(i, LED_STATE.OFF);
+            }
+        }
+        // Lower buttons 1-4: parameters 4-7
+        for (let i = 0; i < 4; i++) {
+            const param = childTrack0PrimaryDevicePage1.getParameter(i + 4);
+            if (param && param.exists().get()) {
+                const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                setClipButtonLED(i, ledState);
+            } else {
+                setClipButtonLED(i, LED_STATE.OFF);
+            }
+        }
+        if (DEBUG) {
+            host.println("🔴 Layer A - Switched to mute parameter LED feedback (upper + lower buttons 1-4)");
+        }
+    } else {
+        // Layer A is not active - show instrument selector states (upper) and clip launcher states (lower)
+        if (childTrack0ChainSelector && childTrack0ChainSelector.exists().get()) {
+            const activeIndex = childTrack0ChainSelector.activeChainIndex().get();
+            const chainCount = childTrack0ChainSelector.chainCount().get();
+            updateChildTrack0InstrumentLEDs(activeIndex, chainCount);
+        } else {
+            // No chain selector - turn off upper LEDs
+            for (let i = 0; i < 4; i++) {
+                setInstrumentButtonLED(i, LED_STATE.OFF);
+            }
+        }
+        // Lower buttons return to clip launcher LED control - manually refresh states
+        refreshChildTrack0ClipLauncherLEDs();
+        if (DEBUG) {
+            host.println("🔴 Layer A - Switched to instrument selector + clip launcher LED feedback");
+        }
+    }
+}
+
+function updateLayerBButtonLEDs() {
+    // Update upper buttons 5-8 and lower buttons 5-8 LEDs based on Layer B state
+    if (layerBActive && childTrack1PrimaryDevicePage1) {
+        // Layer B is active - show mute parameter states
+        // Upper buttons 5-8: parameters 0-3
+        for (let i = 0; i < 4; i++) {
+            const param = childTrack1PrimaryDevicePage1.getParameter(i);
+            if (param && param.exists().get()) {
+                const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                setInstrumentButtonLED(i + 4, ledState); // Map to buttons 4-7
+            } else {
+                setInstrumentButtonLED(i + 4, LED_STATE.OFF);
+            }
+        }
+        // Lower buttons 5-8: parameters 4-7
+        for (let i = 0; i < 4; i++) {
+            const param = childTrack1PrimaryDevicePage1.getParameter(i + 4);
+            if (param && param.exists().get()) {
+                const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                setClipButtonLED(i + 4, ledState); // Map to buttons 4-7
+            } else {
+                setClipButtonLED(i + 4, LED_STATE.OFF);
+            }
+        }
+        if (DEBUG) {
+            host.println("🔴 Layer B - Switched to mute parameter LED feedback (upper + lower buttons 5-8)");
+        }
+    } else {
+        // Layer B is not active - show instrument selector states (upper) and clip launcher states (lower)
+        if (childTrack1ChainSelector && childTrack1ChainSelector.exists().get()) {
+            const activeIndex = childTrack1ChainSelector.activeChainIndex().get();
+            const chainCount = childTrack1ChainSelector.chainCount().get();
+            updateChildTrack1InstrumentLEDs(activeIndex, chainCount);
+        } else {
+            // No chain selector - turn off upper LEDs
+            for (let i = 4; i < 8; i++) {
+                setInstrumentButtonLED(i, LED_STATE.OFF);
+            }
+        }
+        // Lower buttons return to clip launcher LED control - manually refresh states
+        refreshChildTrack1ClipLauncherLEDs();
+        if (DEBUG) {
+            host.println("🔴 Layer B - Switched to instrument selector + clip launcher LED feedback");
+        }
+    }
+}
+
+function refreshChildTrack0ClipLauncherLEDs() {
+    // Manually refresh clip launcher LED states for lower buttons 1-4
+    if (childTrack0ClipLauncherSlotBank) {
+        for (let i = 0; i < 4; i++) {
+            const slot = childTrack0ClipLauncherSlotBank.getItemAt(i);
+            if (slot) {
+                const buttonIndex = i; // Direct mapping: slot 0 -> button 0, etc.
+                if (slot.isPlaying().get()) {
+                    setClipButtonLED(buttonIndex, LED_STATE.ON);
+                } else if (slot.hasContent().get()) {
+                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                } else {
+                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                }
+            } else {
+                setClipButtonLED(i, LED_STATE.OFF);
+            }
+        }
+    } else {
+        // No clip launcher - turn off LEDs
+        for (let i = 0; i < 4; i++) {
+            setClipButtonLED(i, LED_STATE.OFF);
+        }
+    }
+}
+
+function refreshChildTrack1ClipLauncherLEDs() {
+    // Manually refresh clip launcher LED states for lower buttons 5-8
+    if (childTrack1ClipLauncherSlotBank) {
+        for (let i = 0; i < 4; i++) {
+            const slot = childTrack1ClipLauncherSlotBank.getItemAt(i);
+            if (slot) {
+                const buttonIndex = i + 4; // Map to buttons 4-7: slot 0 -> button 4, etc.
+                if (slot.isPlaying().get()) {
+                    setClipButtonLED(buttonIndex, LED_STATE.ON);
+                } else if (slot.hasContent().get()) {
+                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                } else {
+                    setClipButtonLED(buttonIndex, LED_STATE.OFF);
+                }
+            } else {
+                setClipButtonLED(i + 4, LED_STATE.OFF);
+            }
+        }
+    } else {
+        // No clip launcher - turn off LEDs
+        for (let i = 4; i < 8; i++) {
+            setClipButtonLED(i, LED_STATE.OFF);
+        }
+    }
 }
 
 function initializeLEDRings() {
@@ -771,8 +1055,12 @@ function setupRemoteControlPages() {
             groupTrackRemotePage4 = pinnedGroupTrack.createCursorRemoteControlsPage("GroupPage4", 8, null);
             groupTrackRemotePage4.selectedPageIndex().set(4);
             
+            // Setup Group Track Fader Page using filter expression
+            groupTrackFaderPage = pinnedGroupTrack.createCursorRemoteControlsPage("GroupFaderPage", 8, "fader");
+            
             if (DEBUG) {
                 host.println("Created Group Track Remote Control Page 4 (using pinned group track)");
+                host.println("Created Group Track Fader Page with 'fader' filter");
             }
             
             // Setup parameter observers for group track page 4
@@ -790,6 +1078,25 @@ function setupRemoteControlPages() {
                 param.value().addValueObserver(function(value) {
                     if (DEBUG) {
                         host.println(`Group Page 4 Parameter ${i} value: ${value}`);
+                    }
+                });
+            }
+            
+            // Setup parameter observers for group track fader page
+            if (groupTrackFaderPage) {
+                const faderParam = groupTrackFaderPage.getParameter(0);
+                faderParam.exists().markInterested();
+                faderParam.name().markInterested();
+                faderParam.value().markInterested();
+                
+                faderParam.exists().addValueObserver(function(exists) {
+                    if (DEBUG && exists) {
+                        host.println(`Group Fader Page Parameter 0 exists: ${faderParam.name().get()}`);
+                    }
+                });
+                faderParam.value().addValueObserver(function(value) {
+                    if (DEBUG) {
+                        host.println(`Group Fader Page Parameter 0 value: ${value}`);
                     }
                 });
             }
@@ -826,24 +1133,22 @@ function setupChildTrackRemotePages() {
         const childTrack0Device = childTrack0DeviceBank.getDevice(0); // Get first device (primary)
         const childTrack1Device = childTrack1DeviceBank.getDevice(0); // Get first device (primary)
         
-        // Create remote control pages on the devices
+        // Create separate remote control pages - one locked to Page 0, one with filter for 'mutes' tag
         childTrack0PrimaryDevicePage0 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage0", 8, null);
-        childTrack0PrimaryDevicePage0.selectedPageIndex().set(0);
+        childTrack0PrimaryDevicePage0.selectedPageIndex().set(0); // Encoders use Page 0 (parameters)
         
-        childTrack0PrimaryDevicePage1 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage1", 8, null);
-        childTrack0PrimaryDevicePage1.selectedPageIndex().set(1);
+        // Create a separate page object for Layer A using filter expression for 'mutes' tag
+        childTrack0PrimaryDevicePage1 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage1", 8, "mutes");
         
-        childTrack0PrimaryDevicePage2 = childTrack0Device.createCursorRemoteControlsPage("Child0DevicePage2", 8, null);
-        childTrack0PrimaryDevicePage2.selectedPageIndex().set(2);
+        childTrack0PrimaryDevicePage2 = null;
         
         childTrack1PrimaryDevicePage0 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage0", 8, null);
-        childTrack1PrimaryDevicePage0.selectedPageIndex().set(0);
+        childTrack1PrimaryDevicePage0.selectedPageIndex().set(0); // Encoders use Page 0 (parameters)
         
-        childTrack1PrimaryDevicePage1 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage1", 8, null);
-        childTrack1PrimaryDevicePage1.selectedPageIndex().set(1);
+        // Create a separate page object for Layer B using filter expression for 'mutes' tag
+        childTrack1PrimaryDevicePage1 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage1", 8, "mutes");
         
-        childTrack1PrimaryDevicePage2 = childTrack1Device.createCursorRemoteControlsPage("Child1DevicePage2", 8, null);
-        childTrack1PrimaryDevicePage2.selectedPageIndex().set(2);
+        childTrack1PrimaryDevicePage2 = null;
         
         // Store device references for later use
         childTrack0PrimaryDevice = childTrack0Device;
@@ -878,15 +1183,13 @@ function setupChildTrackParameterObservers() {
     const pages = [
         { page: childTrack0PrimaryDevicePage0, name: "Child0PrimaryPage0" },
         { page: childTrack0PrimaryDevicePage1, name: "Child0PrimaryPage1" },
-        { page: childTrack0PrimaryDevicePage2, name: "Child0PrimaryPage2" },
         { page: childTrack1PrimaryDevicePage0, name: "Child1PrimaryPage0" },
-        { page: childTrack1PrimaryDevicePage1, name: "Child1PrimaryPage1" },
-        { page: childTrack1PrimaryDevicePage2, name: "Child1PrimaryPage2" }
-    ];
+        { page: childTrack1PrimaryDevicePage1, name: "Child1PrimaryPage1" }
+    ].filter(p => p.page !== null); // Filter out null pages
     
     pages.forEach(pageInfo => {
         if (pageInfo.page) {
-            for (let i = 0; i < 8; i++) {
+            for (let i = 0; i < 8; i++) { // Back to 8 parameters per page
                 const param = pageInfo.page.getParameter(i);
                 param.exists().markInterested();
                 param.name().markInterested();
@@ -906,6 +1209,9 @@ function setupChildTrackParameterObservers() {
                     
                     // Update LED rings for encoder-controlled parameters
                     updateParameterLEDFeedback(pageInfo.name, i, value);
+                    
+                    // Update LED feedback for mute parameters when in layer mode
+                    updateMuteParameterLEDFeedback(pageInfo.name, i, value);
                 });
             }
         }
@@ -937,8 +1243,8 @@ function setupClipLauncherSlotBanks() {
                             
                             // Add observers for LED feedback
                             const buttonIndex = i; // Direct mapping: slot 0 -> button 0, etc.
-                            
-                            if (DEBUG) {
+    
+    if (DEBUG) {
                                 host.println(`📋 Adding isPlaying observer for Child Track 0 Slot ${i} -> Button ${buttonIndex + 1}`);
                             }
                             
@@ -1068,18 +1374,22 @@ function setupChainSelectorObservers() {
                 if (DEBUG) {
                     host.println(`Child Track 0 active chain index: ${index}`);
                 }
-                // Update instrument button LEDs for Child Track 0
-                const chainCount = childTrack0ChainSelector.chainCount().get();
-                updateChildTrack0InstrumentLEDs(index, chainCount);
+                // Update instrument button LEDs for Child Track 0 (only if Layer A is not active)
+                if (!layerAActive) {
+                    const chainCount = childTrack0ChainSelector.chainCount().get();
+                    updateChildTrack0InstrumentLEDs(index, chainCount);
+                }
             });
             
             childTrack0ChainSelector.chainCount().addValueObserver(function(count) {
                 if (DEBUG) {
                     host.println(`Child Track 0 chain count: ${count}`);
                 }
-                // Update instrument button LEDs when chain count changes
-                const activeIndex = childTrack0ChainSelector.activeChainIndex().get();
-                updateChildTrack0InstrumentLEDs(activeIndex, count);
+                // Update instrument button LEDs when chain count changes (only if Layer A is not active)
+                if (!layerAActive) {
+                    const activeIndex = childTrack0ChainSelector.activeChainIndex().get();
+                    updateChildTrack0InstrumentLEDs(activeIndex, count);
+                }
             });
         }
         
@@ -1099,18 +1409,22 @@ function setupChainSelectorObservers() {
                 if (DEBUG) {
                     host.println(`Child Track 1 active chain index: ${index}`);
                 }
-                // Update instrument button LEDs for Child Track 1
-                const chainCount = childTrack1ChainSelector.chainCount().get();
-                updateChildTrack1InstrumentLEDs(index, chainCount);
+                // Update instrument button LEDs for Child Track 1 (only if Layer B is not active)
+                if (!layerBActive) {
+                    const chainCount = childTrack1ChainSelector.chainCount().get();
+                    updateChildTrack1InstrumentLEDs(index, chainCount);
+                }
             });
             
             childTrack1ChainSelector.chainCount().addValueObserver(function(count) {
                 if (DEBUG) {
                     host.println(`Child Track 1 chain count: ${count}`);
                 }
-                // Update instrument button LEDs when chain count changes
-                const activeIndex = childTrack1ChainSelector.activeChainIndex().get();
-                updateChildTrack1InstrumentLEDs(activeIndex, count);
+                // Update instrument button LEDs when chain count changes (only if Layer B is not active)
+                if (!layerBActive) {
+                    const activeIndex = childTrack1ChainSelector.activeChainIndex().get();
+                    updateChildTrack1InstrumentLEDs(activeIndex, count);
+                }
             });
         }
         
