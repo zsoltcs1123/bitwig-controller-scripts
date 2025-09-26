@@ -1,0 +1,11 @@
+{
+    "name": "X-Touch Mini Sampler Single 6 MC",
+    "vendor": "Behringer",
+    "version": "1.0.0",
+    "author": "Zsolt",
+    "description": "Behringer X-Touch Mini single-track controller script with mutually exclusive layer switching",
+    "category": "Controller",
+    "hardware_vendor": "Behringer",
+    "hardware_model": "X-Touch Mini",
+    "main": "xtm-sampler-single-mc.control.js"
+}
