@@ -3,9 +3,9 @@ host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Behringer",
-    "X-Touch Mini Single 6 MC Mode",
+    "X-Touch Mini Single 6 MC Mode 1",
     "1.0",
-    "a1b2c3d4-e5f6-7890-1234-56789abcdef2",
+    "a1b2c3d4-e5f6-7890-1234-56789abcdef1",
     "Zsolt"
 );
 host.defineMidiPorts(1, 1);
