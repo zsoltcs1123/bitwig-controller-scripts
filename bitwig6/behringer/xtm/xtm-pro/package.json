@@ -1,0 +1,12 @@
+{
+    "name": "X-Touch Mini Pro",
+    "vendor": "Behringer",
+    "version": "1.0.0",
+    "author": "Zsolt",
+    "description": "Behringer X-Touch Mini Pro - Sophisticated multi-track controller with group track support",
+    "category": "Controller",
+    "hardware_vendor": "Behringer",
+    "hardware_model": "X-Touch Mini",
+    "main": "xtm-pro.control.js"
+}
+
