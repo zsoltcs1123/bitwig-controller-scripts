@@ -71,11 +71,23 @@ const LOWER_BUTTON_MODE = {
 let midiIn, midiOut;
 let lowerButtonMode = LOWER_BUTTON_MODE.NONE;
 let selectedChildIndex = 0;
+let faderValue = 0.0;
+let encoderContextIsDevice = false;
 
 let trackBank;
 let pinnedTrack;
 let pinnedTrackExists = false;
 let pinnedTrackIsGroup = false;
+
+let childTrackBank;
+let childTracks = [];
+let childTrackPerformPages = [];
+let childTrackDeviceBanks = [];
+let childTrackDeviceMutesPages = [];
+let childTrackDevicePages = [];
+let childTrackClipLauncherSlotBanks = [];
+
+let groupTrackMutesPage;
 
 function init() {
     midiIn = host.getMidiInPort(0);
@@ -185,8 +197,25 @@ function handleEncoderTurn(encoderIndex, value) {
         return;
     }
     
-    if (DEBUG) {
-        host.println(`Encoder ${encoderIndex + 1} turned: ${increment > 0 ? 'CW' : 'CCW'}`);
+    if (pinnedTrackIsGroup) {
+        const page = encoderContextIsDevice ? childTrackDevicePages[selectedChildIndex] : childTrackPerformPages[selectedChildIndex];
+        const pageName = encoderContextIsDevice ? "device" : "perform";
+        
+        if (page) {
+            const param = page.getParameter(encoderIndex);
+            if (param && param.exists().get()) {
+                param.inc(increment);
+                updateEncoderLEDRing(encoderIndex, param.get());
+                
+                if (DEBUG && Math.random() < 0.1) {
+                    host.println(`Encoder ${encoderIndex + 1} -> Child ${selectedChildIndex} ${pageName}: ${param.name().get()} = ${param.get().toFixed(2)}`);
+                }
+            }
+        }
+    } else {
+        if (DEBUG) {
+            host.println(`Encoder ${encoderIndex + 1} turned: ${increment > 0 ? 'CW' : 'CCW'} (non-group mode not implemented yet)`);
+        }
     }
 }
 
@@ -202,22 +231,95 @@ function handleUpperButton(buttonIndex, isPressed) {
     }
     
     if (!isPressed) return;
+    
+    if (pinnedTrackIsGroup) {
+        selectChildTrack(buttonIndex);
+    }
 }
 
 function handleLowerButton(buttonIndex, isPressed) {
     if (DEBUG) {
-        host.println(`Lower button ${buttonIndex + 1} ${isPressed ? 'pressed' : 'released'}`);
+        host.println(`Lower button ${buttonIndex + 1} ${isPressed ? 'pressed' : 'released'} - Mode: ${lowerButtonMode}`);
     }
     
     if (!isPressed) return;
+    
+    if (pinnedTrackIsGroup) {
+        if (lowerButtonMode === LOWER_BUTTON_MODE.NONE) {
+            toggleGroupTrackMuteParameter(buttonIndex);
+        } else if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+            toggleChildTrackDeviceMuteParameter(buttonIndex);
+        } else if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_B) {
+            launchClipOnSelectedChild(buttonIndex);
+        }
+    }
+}
+
+function toggleGroupTrackMuteParameter(buttonIndex) {
+    if (!groupTrackMutesPage) {
+        if (DEBUG) {
+            host.println(`Group track mutes page not available`);
+        }
+        return;
+    }
+    
+    const param = groupTrackMutesPage.getParameter(buttonIndex);
+    if (param && param.exists().get()) {
+        const currentValue = param.value().get();
+        const newValue = currentValue > 0.5 ? 0 : 127;
+        param.value().set(newValue, 128);
+        
+        if (DEBUG) {
+            host.println(`Toggled Group Track mute ${buttonIndex + 1}: ${param.name().get()} = ${newValue > 0.5 ? 'ON' : 'OFF'}`);
+        }
+    } else {
+        if (DEBUG) {
+            host.println(`Group Track mute parameter ${buttonIndex + 1} not available`);
+        }
+    }
+}
+
+function toggleChildTrackDeviceMuteParameter(buttonIndex) {
+    const deviceMutesPage = childTrackDeviceMutesPages[selectedChildIndex];
+    if (!deviceMutesPage) {
+        if (DEBUG) {
+            host.println(`Child track ${selectedChildIndex} device mutes page not available`);
+        }
+        return;
+    }
+    
+    const param = deviceMutesPage.getParameter(buttonIndex);
+    if (param && param.exists().get()) {
+        const currentValue = param.value().get();
+        const newValue = currentValue > 0.5 ? 0 : 127;
+        param.value().set(newValue, 128);
+        
+        if (DEBUG) {
+            host.println(`Toggled Child ${selectedChildIndex} Device mute ${buttonIndex + 1}: ${param.name().get()} = ${newValue > 0.5 ? 'ON' : 'OFF'}`);
+        }
+    } else {
+        if (DEBUG) {
+            host.println(`Child ${selectedChildIndex} Device mute parameter ${buttonIndex + 1} not available`);
+        }
+    }
 }
 
 function handleFaderPitchBend(lsb, msb) {
     const pitchBendValue = (msb << 7) | lsb;
     const normalizedValue = pitchBendValue / 16383.0;
     
-    if (DEBUG) {
-        host.println(`Fader moved: raw=${pitchBendValue}, normalized=${normalizedValue.toFixed(4)}`);
+    faderValue = normalizedValue;
+    
+    const newEncoderContext = faderValue > 0.5;
+    
+    if (newEncoderContext !== encoderContextIsDevice) {
+        encoderContextIsDevice = newEncoderContext;
+        
+        if (DEBUG) {
+            host.println(`Fader context switch: ${encoderContextIsDevice ? 'DEVICE' : 'PERFORM'} (fader=${faderValue.toFixed(2)})`);
+        }
+        
+        updateEncoderLEDRingsForCurrentContext();
     }
 }
 
@@ -259,6 +361,68 @@ function handleLayerButton(layer, isPressed) {
             }
         }
     }
+    
+    updateLowerButtonLEDs();
+}
+
+function updateLowerButtonLEDs() {
+    if (!pinnedTrackIsGroup) {
+        for (let i = 0; i < 8; i++) {
+            setLowerButtonLED(i, LED_STATE.OFF);
+        }
+        return;
+    }
+    
+    if (lowerButtonMode === LOWER_BUTTON_MODE.NONE) {
+        for (let i = 0; i < 8; i++) {
+            const param = groupTrackMutesPage.getParameter(i);
+            if (param && param.exists().get()) {
+                const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                setLowerButtonLED(i, ledState);
+            } else {
+                setLowerButtonLED(i, LED_STATE.OFF);
+            }
+        }
+    } else if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+        const deviceMutesPage = childTrackDeviceMutesPages[selectedChildIndex];
+        if (deviceMutesPage) {
+            for (let i = 0; i < 8; i++) {
+                const param = deviceMutesPage.getParameter(i);
+                if (param && param.exists().get()) {
+                    const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                    setLowerButtonLED(i, ledState);
+                } else {
+                    setLowerButtonLED(i, LED_STATE.OFF);
+                }
+            }
+        } else {
+            for (let i = 0; i < 8; i++) {
+                setLowerButtonLED(i, LED_STATE.OFF);
+            }
+        }
+    } else if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_B) {
+        const clipSlotBank = childTrackClipLauncherSlotBanks[selectedChildIndex];
+        if (clipSlotBank) {
+            for (let i = 0; i < 8; i++) {
+                const slot = clipSlotBank.getItemAt(i);
+                if (slot) {
+                    if (slot.isPlaying().get()) {
+                        setLowerButtonLED(i, LED_STATE.ON);
+                    } else if (slot.hasContent().get()) {
+                        setLowerButtonLED(i, LED_STATE.OFF);
+                    } else {
+                        setLowerButtonLED(i, LED_STATE.OFF);
+                    }
+                } else {
+                    setLowerButtonLED(i, LED_STATE.OFF);
+                }
+            }
+        } else {
+            for (let i = 0; i < 8; i++) {
+                setLowerButtonLED(i, LED_STATE.OFF);
+            }
+        }
+    }
 }
 
 function setupTracks() {
@@ -274,31 +438,339 @@ function setupTracks() {
         pinnedTrack.name().markInterested();
         pinnedTrack.isGroup().markInterested();
         
-        pinnedTrack.exists().addValueObserver(function(exists) {
-            pinnedTrackExists = exists;
-            if (DEBUG) {
-                host.println(`Pinned track exists: ${exists}`);
-            }
-        });
+        groupTrackMutesPage = pinnedTrack.createCursorRemoteControlsPage("GroupMutes", 8, "mutes");
         
-        pinnedTrack.name().addValueObserver(function(name) {
-            if (DEBUG) {
-                host.println(`Pinned track name: ${name}`);
-            }
-        });
+        childTrackBank = pinnedTrack.createTrackBank(8, 0, 8, false);
         
-        pinnedTrack.isGroup().addValueObserver(function(isGroup) {
-            pinnedTrackIsGroup = isGroup;
-            if (DEBUG) {
-                host.println(`Pinned track is group: ${isGroup}`);
-            }
-        });
+        for (let i = 0; i < 8; i++) {
+            const childTrack = childTrackBank.getTrack(i);
+            childTracks[i] = childTrack;
+            
+            childTrack.exists().markInterested();
+            childTrack.name().markInterested();
+            
+            const performPage = childTrack.createCursorRemoteControlsPage("ChildPerform" + i, 8, "perform");
+            childTrackPerformPages[i] = performPage;
+            
+            const deviceBank = childTrack.createDeviceBank(8);
+            childTrackDeviceBanks[i] = deviceBank;
+            const primaryDevice = deviceBank.getDevice(0);
+            const deviceMutesPage = primaryDevice.createCursorRemoteControlsPage("ChildDeviceMutes" + i, 8, "mutes");
+            childTrackDeviceMutesPages[i] = deviceMutesPage;
+            const devicePage = primaryDevice.createCursorRemoteControlsPage("ChildDevice" + i, 8, "device");
+            childTrackDevicePages[i] = devicePage;
+        }
+        
+        if (DEBUG) {
+            host.println("Child track bank created (will be used if pinned track is a group)");
+        }
+        
+        setupTrackObservers();
+        setupRemoteControlPageObservers();
+        setupClipLauncherSlotBanks();
         
         host.scheduleTask(logTrackStatus, null, 100);
         
     } catch (error) {
         if (DEBUG) {
             host.println(`ERROR in setupTracks: ${error}`);
+        }
+    }
+}
+
+function setupTrackObservers() {
+    pinnedTrack.exists().addValueObserver(function(exists) {
+        pinnedTrackExists = exists;
+        if (DEBUG) {
+            host.println(`Pinned track exists: ${exists}`);
+        }
+        if (exists && pinnedTrackIsGroup) {
+            updateUpperButtonLEDs();
+        }
+    });
+    
+    pinnedTrack.name().addValueObserver(function(name) {
+        if (DEBUG) {
+            host.println(`Pinned track name: ${name}`);
+        }
+    });
+    
+    pinnedTrack.isGroup().addValueObserver(function(isGroup) {
+        pinnedTrackIsGroup = isGroup;
+        if (DEBUG) {
+            host.println(`Pinned track is group: ${isGroup}`);
+        }
+        updateUpperButtonLEDs();
+    });
+    
+    for (let i = 0; i < 8; i++) {
+        const childIndex = i;
+        childTracks[i].exists().addValueObserver(function(exists) {
+            if (DEBUG) {
+                host.println(`Child track ${childIndex} exists: ${exists}`);
+            }
+            if (pinnedTrackIsGroup) {
+                updateUpperButtonLEDs();
+            }
+        });
+        
+        childTracks[i].name().addValueObserver(function(name) {
+            if (DEBUG && name && pinnedTrackIsGroup) {
+                host.println(`Child track ${childIndex} name: ${name}`);
+            }
+        });
+    }
+}
+
+function setupRemoteControlPageObservers() {
+    for (let i = 0; i < 8; i++) {
+        const childIndex = i;
+        const performPage = childTrackPerformPages[i];
+        
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            const param = performPage.getParameter(paramIndex);
+            param.exists().markInterested();
+            param.name().markInterested();
+            param.value().markInterested();
+            
+            const encoderIndex = paramIndex;
+            param.value().addValueObserver(function(value) {
+                if (pinnedTrackIsGroup && selectedChildIndex === childIndex && !encoderContextIsDevice) {
+                    updateEncoderLEDRing(encoderIndex, value);
+                }
+            });
+        }
+    }
+    
+    for (let i = 0; i < 8; i++) {
+        const childIndex = i;
+        const devicePage = childTrackDevicePages[i];
+        
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            const param = devicePage.getParameter(paramIndex);
+            param.exists().markInterested();
+            param.name().markInterested();
+            param.value().markInterested();
+            
+            const encoderIndex = paramIndex;
+            param.value().addValueObserver(function(value) {
+                if (pinnedTrackIsGroup && selectedChildIndex === childIndex && encoderContextIsDevice) {
+                    updateEncoderLEDRing(encoderIndex, value);
+                }
+            });
+        }
+    }
+    
+    for (let i = 0; i < 8; i++) {
+        const param = groupTrackMutesPage.getParameter(i);
+        param.exists().markInterested();
+        param.name().markInterested();
+        param.value().markInterested();
+        
+        const buttonIndex = i;
+        param.value().addValueObserver(function(value) {
+            if (pinnedTrackIsGroup && lowerButtonMode === LOWER_BUTTON_MODE.NONE) {
+                const ledState = value > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                setLowerButtonLED(buttonIndex, ledState);
+            }
+        });
+    }
+    
+    for (let i = 0; i < 8; i++) {
+        const childIndex = i;
+        const deviceMutesPage = childTrackDeviceMutesPages[i];
+        
+        for (let paramIndex = 0; paramIndex < 8; paramIndex++) {
+            const param = deviceMutesPage.getParameter(paramIndex);
+            param.exists().markInterested();
+            param.name().markInterested();
+            param.value().markInterested();
+            
+            const buttonIndex = paramIndex;
+            param.value().addValueObserver(function(value) {
+                if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+                    const ledState = value > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                    setLowerButtonLED(buttonIndex, ledState);
+                }
+            });
+        }
+    }
+    
+    if (DEBUG) {
+        host.println("Remote control page observers setup complete");
+    }
+}
+
+function setupClipLauncherSlotBanks() {
+    if (DEBUG) {
+        host.println("Setting up clip launcher slot banks...");
+    }
+    
+    try {
+        for (let i = 0; i < 8; i++) {
+            const childTrack = childTracks[i];
+            if (childTrack) {
+                const clipSlots = childTrack.clipLauncherSlotBank();
+                childTrackClipLauncherSlotBanks[i] = clipSlots;
+                
+                const childIndex = i;
+                for (let slotIndex = 0; slotIndex < 8; slotIndex++) {
+                    const slot = clipSlots.getItemAt(slotIndex);
+                    if (slot) {
+                        slot.hasContent().markInterested();
+                        slot.isPlaying().markInterested();
+                        
+                        const buttonIndex = slotIndex;
+                        
+                        slot.isPlaying().addValueObserver((isPlaying) => {
+                            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_B) {
+                                if (isPlaying) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.ON);
+                                } else if (slot.hasContent().get()) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
+                                }
+                            }
+                        });
+                        
+                        slot.hasContent().addValueObserver((hasContent) => {
+                            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_B) {
+                                if (!hasContent) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else if (!slot.isPlaying().get()) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        
+        if (DEBUG) {
+            host.println("Clip launcher slot banks setup complete");
+        }
+        
+    } catch (error) {
+        if (DEBUG) {
+            host.println(`ERROR in setupClipLauncherSlotBanks: ${error}`);
+        }
+    }
+}
+
+function launchClipOnSelectedChild(slotIndex) {
+    const clipSlotBank = childTrackClipLauncherSlotBanks[selectedChildIndex];
+    if (!clipSlotBank) {
+        if (DEBUG) {
+            host.println(`Clip launcher not available for child ${selectedChildIndex}`);
+        }
+        return;
+    }
+    
+    const childTrack = childTracks[selectedChildIndex];
+    if (!childTrack || !childTrack.exists().get()) {
+        if (DEBUG) {
+            host.println(`Child track ${selectedChildIndex} does not exist`);
+        }
+        return;
+    }
+    
+    const clipSlot = clipSlotBank.getItemAt(slotIndex);
+    if (clipSlot) {
+        if (DEBUG) {
+            host.println(`Launching clip slot ${slotIndex} on child track ${selectedChildIndex}: ${childTrack.name().get()}`);
+        }
+        clipSlot.launch();
+    } else {
+        if (DEBUG) {
+            host.println(`Clip slot ${slotIndex} does not exist on child ${selectedChildIndex}`);
+        }
+    }
+}
+
+function selectChildTrack(childIndex) {
+    if (!pinnedTrackIsGroup || !childTrackBank) {
+        if (DEBUG) {
+            host.println(`Cannot select child ${childIndex} - not in group mode`);
+        }
+        return;
+    }
+    
+    if (childIndex < 0 || childIndex > 7) {
+        if (DEBUG) {
+            host.println(`Invalid child index: ${childIndex}`);
+        }
+        return;
+    }
+    
+    const childTrack = childTracks[childIndex];
+    if (!childTrack || !childTrack.exists().get()) {
+        if (DEBUG) {
+            host.println(`Child track ${childIndex} does not exist`);
+        }
+        return;
+    }
+    
+    selectedChildIndex = childIndex;
+    
+    if (DEBUG) {
+        host.println(`Selected child track ${selectedChildIndex}: ${childTrack.name().get()}`);
+    }
+    
+    updateUpperButtonLEDs();
+    updateEncoderLEDRingsForSelectedChild();
+    updateLowerButtonLEDs();
+}
+
+function updateEncoderLEDRingsForSelectedChild() {
+    if (!pinnedTrackIsGroup) {
+        return;
+    }
+    
+    updateEncoderLEDRingsForCurrentContext();
+}
+
+function updateEncoderLEDRingsForCurrentContext() {
+    if (!pinnedTrackIsGroup) {
+        return;
+    }
+    
+    const page = encoderContextIsDevice ? childTrackDevicePages[selectedChildIndex] : childTrackPerformPages[selectedChildIndex];
+    
+    if (!page) {
+        for (let i = 0; i < 8; i++) {
+            setLEDRingValue(i, 32);
+        }
+        return;
+    }
+    
+    for (let i = 0; i < 8; i++) {
+        const param = page.getParameter(i);
+        if (param && param.exists().get()) {
+            updateEncoderLEDRing(i, param.get());
+        } else {
+            setLEDRingValue(i, 32);
+        }
+    }
+}
+
+function updateUpperButtonLEDs() {
+    if (pinnedTrackIsGroup) {
+        for (let i = 0; i < 8; i++) {
+            if (childTracks[i] && childTracks[i].exists().get()) {
+                if (i === selectedChildIndex) {
+                    setUpperButtonLED(i, LED_STATE.ON);
+                } else {
+                    setUpperButtonLED(i, LED_STATE.OFF);
+                }
+            } else {
+                setUpperButtonLED(i, LED_STATE.OFF);
+            }
+        }
+    } else {
+        for (let i = 0; i < 8; i++) {
+            setUpperButtonLED(i, LED_STATE.OFF);
         }
     }
 }
