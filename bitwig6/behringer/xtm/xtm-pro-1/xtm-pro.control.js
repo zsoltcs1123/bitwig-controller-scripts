@@ -3,7 +3,7 @@ host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Behringer",
-    "X-Touch Mini Pro",
+    "X-Touch Mini Pro 1",
     "1.0",
     "a1b2c3d4-e5f6-7890-1234-56789abcdef5",
     "Zsolt"
@@ -85,6 +85,7 @@ let childTrackPerformPages = [];
 let childTrackDeviceBanks = [];
 let childTrackDeviceMutesPages = [];
 let childTrackDevicePages = [];
+let childTrackChainSelectors = [];
 let childTrackClipLauncherSlotBanks = [];
 
 let groupTrackMutesPage;
@@ -220,8 +221,42 @@ function handleEncoderTurn(encoderIndex, value) {
 }
 
 function handleEncoderPush(encoderIndex, isPressed) {
-    if (DEBUG && isPressed) {
+    if (!isPressed) return;
+    
+    if (DEBUG) {
         host.println(`Encoder ${encoderIndex + 1} pushed`);
+    }
+    
+    if (pinnedTrackIsGroup) {
+        let successCount = 0;
+        let totalChainSelectors = 0;
+        
+        for (let i = 0; i < 8; i++) {
+            const chainSelector = childTrackChainSelectors[i];
+            
+            if (chainSelector && chainSelector.exists().get()) {
+                totalChainSelectors++;
+                const chainCount = chainSelector.chainCount().get();
+                
+                if (encoderIndex < chainCount) {
+                    chainSelector.activeChainIndex().set(encoderIndex);
+                    successCount++;
+                    
+                    if (DEBUG) {
+                        const trackName = childTracks[i].name().get();
+                        host.println(`  Set child ${i} (${trackName}) instrument to ${encoderIndex}`);
+                    }
+                }
+            }
+        }
+        
+        if (DEBUG) {
+            host.println(`Set instrument ${encoderIndex} on ${successCount}/${totalChainSelectors} child tracks with chain selectors`);
+        }
+        
+        if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+            updateLowerButtonLEDs();
+        }
     }
 }
 
@@ -280,6 +315,19 @@ function toggleGroupTrackMuteParameter(buttonIndex) {
 }
 
 function toggleChildTrackDeviceMuteParameter(buttonIndex) {
+    const chainSelector = childTrackChainSelectors[selectedChildIndex];
+    
+    if (chainSelector && chainSelector.exists().get()) {
+        const chainCount = chainSelector.chainCount().get();
+        if (buttonIndex < chainCount) {
+            chainSelector.activeChainIndex().set(buttonIndex);
+            if (DEBUG) {
+                host.println(`Selected instrument chain ${buttonIndex} on child ${selectedChildIndex}`);
+            }
+            return;
+        }
+    }
+    
     const deviceMutesPage = childTrackDeviceMutesPages[selectedChildIndex];
     if (!deviceMutesPage) {
         if (DEBUG) {
@@ -384,20 +432,39 @@ function updateLowerButtonLEDs() {
             }
         }
     } else if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
-        const deviceMutesPage = childTrackDeviceMutesPages[selectedChildIndex];
-        if (deviceMutesPage) {
+        const chainSelector = childTrackChainSelectors[selectedChildIndex];
+        
+        if (chainSelector && chainSelector.exists().get()) {
+            const activeChainIndex = chainSelector.activeChainIndex().get();
+            const chainCount = chainSelector.chainCount().get();
+            
             for (let i = 0; i < 8; i++) {
-                const param = deviceMutesPage.getParameter(i);
-                if (param && param.exists().get()) {
-                    const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
-                    setLowerButtonLED(i, ledState);
+                if (i < chainCount) {
+                    if (i === activeChainIndex) {
+                        setLowerButtonLED(i, LED_STATE.ON);
+                    } else {
+                        setLowerButtonLED(i, LED_STATE.OFF);
+                    }
                 } else {
                     setLowerButtonLED(i, LED_STATE.OFF);
                 }
             }
         } else {
-            for (let i = 0; i < 8; i++) {
-                setLowerButtonLED(i, LED_STATE.OFF);
+            const deviceMutesPage = childTrackDeviceMutesPages[selectedChildIndex];
+            if (deviceMutesPage) {
+                for (let i = 0; i < 8; i++) {
+                    const param = deviceMutesPage.getParameter(i);
+                    if (param && param.exists().get()) {
+                        const ledState = param.get() > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                        setLowerButtonLED(i, ledState);
+                    } else {
+                        setLowerButtonLED(i, LED_STATE.OFF);
+                    }
+                }
+            } else {
+                for (let i = 0; i < 8; i++) {
+                    setLowerButtonLED(i, LED_STATE.OFF);
+                }
             }
         }
     } else if (lowerButtonMode === LOWER_BUTTON_MODE.LAYER_B) {
@@ -459,6 +526,8 @@ function setupTracks() {
             childTrackDeviceMutesPages[i] = deviceMutesPage;
             const devicePage = primaryDevice.createCursorRemoteControlsPage("ChildDevice" + i, 8, "device");
             childTrackDevicePages[i] = devicePage;
+            const chainSelector = primaryDevice.createChainSelector();
+            childTrackChainSelectors[i] = chainSelector;
         }
         
         if (DEBUG) {
@@ -589,11 +658,50 @@ function setupRemoteControlPageObservers() {
             const buttonIndex = paramIndex;
             param.value().addValueObserver(function(value) {
                 if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
-                    const ledState = value > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
-                    setLowerButtonLED(buttonIndex, ledState);
+                    const chainSelector = childTrackChainSelectors[childIndex];
+                    if (!chainSelector || !chainSelector.exists().get()) {
+                        const ledState = value > 0.5 ? LED_STATE.ON : LED_STATE.OFF;
+                        setLowerButtonLED(buttonIndex, ledState);
+                    }
                 }
             });
         }
+    }
+    
+    for (let i = 0; i < 8; i++) {
+        const childIndex = i;
+        const chainSelector = childTrackChainSelectors[i];
+        
+        chainSelector.exists().markInterested();
+        chainSelector.activeChainIndex().markInterested();
+        chainSelector.chainCount().markInterested();
+        
+        chainSelector.exists().addValueObserver(function(exists) {
+            if (DEBUG) {
+                host.println(`Child ${childIndex} chain selector exists: ${exists}`);
+            }
+            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+                updateLowerButtonLEDs();
+            }
+        });
+        
+        chainSelector.activeChainIndex().addValueObserver(function(index) {
+            if (DEBUG) {
+                host.println(`Child ${childIndex} active chain index: ${index}`);
+            }
+            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+                updateLowerButtonLEDs();
+            }
+        });
+        
+        chainSelector.chainCount().addValueObserver(function(count) {
+            if (DEBUG) {
+                host.println(`Child ${childIndex} chain count: ${count}`);
+            }
+            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && lowerButtonMode === LOWER_BUTTON_MODE.LAYER_A) {
+                updateLowerButtonLEDs();
+            }
+        });
     }
     
     if (DEBUG) {
