@@ -25,8 +25,18 @@ The script is designed to work with a **GROUP TRACK** as the pinned track (Track
 ## MIXER Mode (Fader > 50%)
 
 ### Encoders
-- **Turn**: Adjust parameters on the page tagged `volumes` on the GROUP TRACK
-- **Push**: (Reserved for future use)
+
+**Default (Layer A OFF):**
+- **Turn**: Adjust parameters on the page tagged `perform` on the GROUP TRACK
+- **Push**: Page selector
+  - Encoder 1: Return to `perform` page
+  - Encoders 2-8: Switch to pages `p2-p7` (if available)
+
+**Layer A Active (Layer A ON):**
+- **Turn**: Adjust parameters on the page tagged `c_perform` on the CURRENT CHILD TRACK's PRIMARY DEVICE
+- **Push**: Page selector
+  - Encoder 1: Return to `c_perform` page
+  - Encoders 2-8: Switch to pages `p2-p7` on current child (if available)
 
 ### Upper Buttons (1-8)
 - Toggle parameters on the page tagged `mutes` on the GROUP TRACK
@@ -35,10 +45,15 @@ The script is designed to work with a **GROUP TRACK** as the pinned track (Track
 ### Lower Buttons (1-8)
 - Select child track (1-8) within the group
 - LED shows currently selected child track
-- Selected child is retained for PLAY mode
+- Selected child is retained for all modes
 
-### Layer A/B Buttons
-- (Reserved for future use)
+### Layer A Button
+- Toggle between GROUP and CHILD encoder contexts (same as PLAY mode)
+- LED ON = Child mode (encoders control current child's c_perform page)
+- LED OFF = Group mode (encoders control group perform page)
+
+### Layer B Button
+- Stop all clips on the CURRENT CHILD TRACK (same as PLAY mode)
 
 ## PLAY Mode (Fader < 50%)
 

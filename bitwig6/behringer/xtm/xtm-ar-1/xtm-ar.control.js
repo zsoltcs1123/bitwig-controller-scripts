@@ -209,17 +209,7 @@ function handleEncoderTurn(encoderIndex, value) {
         return;
     }
     
-    if (currentMode === MODE.MIXER) {
-        const param = groupTrackVolumesPage.getParameter(encoderIndex);
-        if (param && param.exists().get()) {
-            param.inc(increment);
-            updateEncoderLEDRing(encoderIndex, param.get());
-            
-            if (DEBUG && Math.random() < 0.1) {
-                host.println(`Encoder ${encoderIndex + 1} -> Group Volumes: ${param.name().get()} = ${param.get().toFixed(2)}`);
-            }
-        }
-    } else if (currentMode === MODE.PLAY) {
+    if (currentMode === MODE.MIXER || currentMode === MODE.PLAY) {
         let page = null;
         let pageName = "";
         
@@ -269,7 +259,7 @@ function handleEncoderPush(encoderIndex, isPressed) {
         return;
     }
     
-    if (currentMode === MODE.PLAY) {
+    if (currentMode === MODE.MIXER || currentMode === MODE.PLAY) {
         if (encoderIndex === 0) {
             currentPageIndex = 0;
             if (DEBUG) {
@@ -438,7 +428,7 @@ function handleLayerButton(layer, isPressed) {
         return;
     }
     
-    if (currentMode === MODE.PLAY) {
+    if (currentMode === MODE.MIXER || currentMode === MODE.PLAY) {
         if (layer === 'A') {
             layerAActive = !layerAActive;
             currentPageIndex = 0;
@@ -477,13 +467,6 @@ function onModeChange() {
         host.println(`Mode changed to: ${currentMode}`);
     }
     
-    if (currentMode === MODE.MIXER) {
-        layerAActive = false;
-        currentPageIndex = 0;
-        setLayerLED('A', LED_STATE.OFF);
-        setLayerLED('B', LED_STATE.OFF);
-    }
-    
     updateUpperButtonLEDs();
     updateLowerButtonLEDs();
     updateEncoderLEDRingsForCurrentMode();
@@ -497,16 +480,7 @@ function updateEncoderLEDRingsForCurrentMode() {
         return;
     }
     
-    if (currentMode === MODE.MIXER) {
-        for (let i = 0; i < 8; i++) {
-            const param = groupTrackVolumesPage.getParameter(i);
-            if (param && param.exists().get()) {
-                updateEncoderLEDRing(i, param.get());
-            } else {
-                setLEDRingValue(i, 32);
-            }
-        }
-    } else if (currentMode === MODE.PLAY) {
+    if (currentMode === MODE.MIXER || currentMode === MODE.PLAY) {
         let page = null;
         
         if (layerAActive) {
