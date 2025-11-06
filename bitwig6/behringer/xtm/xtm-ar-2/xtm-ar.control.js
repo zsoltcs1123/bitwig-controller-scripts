@@ -3,9 +3,9 @@ host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Behringer",
-    "X-Touch Mini AR 1",
+    "X-Touch Mini AR 2",
     "1.0",
-    "b2c3d4e5-f6a7-8901-2345-67890bcdef12",
+    "b2c3d4e5-f6a7-8901-2345-67890bcdef13",
     "Zsolt"
 );
 host.defineMidiPorts(1, 1);
@@ -17,7 +17,7 @@ const OUTPUT_MIDI_CHANNEL = 0;
 const LED_GLOBAL_CHANNEL = 0;
 const DEBUG = true;
 
-const PINNED_TRACK_INDEX = 0;
+const PINNED_TRACK_INDEX = 1;
 
 const CC = {
     ENCODER_1: 16, ENCODER_2: 17, ENCODER_3: 18, ENCODER_4: 19,
@@ -83,10 +83,11 @@ let childTrackBank;
 let childTracks = [];
 let childTrackMutes = [];
 
+let sceneBank;
+
 let groupTrackVolumesPage;
 let groupTrackMutesPage;
 let groupTrackPerformPage;
-let groupTrackFaderPage;
 let groupTrackDeviceBank;
 let groupTrackPrimaryDevice;
 let groupTrackAdditionalPages = [];
@@ -95,10 +96,6 @@ let childTrackDevicePages = [];
 let childTrackMutesPages = [];
 let childTrackAdditionalPages = [];
 let childTrackClipLauncherSlotBanks = [];
-
-let lowerButtonPressTime = [null, null, null, null, null, null, null, null];
-let lowerButtonHoldTask = [null, null, null, null, null, null, null, null];
-const HOLD_TIME_MS = 300;
 
 function init() {
     midiIn = host.getMidiInPort(0);
@@ -111,7 +108,7 @@ function init() {
     initializeLEDRings();
     
     setLayerLED('A', LED_STATE.OFF);
-    setLayerLED('B', currentMode === MODE.MIXER ? LED_STATE.ON : LED_STATE.OFF);
+    setLayerLED('B', LED_STATE.OFF);
     
     initializeButtonLEDs();
     
@@ -316,60 +313,20 @@ function handleLowerButton(buttonIndex, isPressed) {
         host.println(`Lower button ${buttonIndex + 1} ${isPressed ? 'pressed' : 'released'} in mode: ${currentMode}`);
     }
     
+    if (!isPressed) return;
+    
     if (!pinnedTrackIsGroup) {
         return;
     }
     
-    if (isPressed) {
-        lowerButtonPressTime[buttonIndex] = Date.now();
-        
-        if (lowerButtonHoldTask[buttonIndex] !== null) {
-            host.cancelTask(lowerButtonHoldTask[buttonIndex]);
-        }
-        
-        const clipSlotBank = childTrackClipLauncherSlotBanks[selectedChildIndex];
-        const clipSlot = clipSlotBank ? clipSlotBank.getItemAt(buttonIndex) : null;
-        const isClipPlaying = clipSlot && clipSlot.isPlaying().get();
-        
-        if (isClipPlaying) {
-            lowerButtonHoldTask[buttonIndex] = host.scheduleTask(function() {
-                stopClipOnSelectedChild(buttonIndex);
-                lowerButtonHoldTask[buttonIndex] = null;
-                if (DEBUG) {
-                    host.println(`Long press detected on button ${buttonIndex + 1} - stopping clip`);
-                }
-            }, null, HOLD_TIME_MS);
-        }
-    } else {
-        const pressDuration = lowerButtonPressTime[buttonIndex] !== null 
-            ? Date.now() - lowerButtonPressTime[buttonIndex] 
-            : 0;
-        
-        if (lowerButtonHoldTask[buttonIndex] !== null) {
-            host.cancelTask(lowerButtonHoldTask[buttonIndex]);
-            lowerButtonHoldTask[buttonIndex] = null;
-        }
-        
-        if (pressDuration < HOLD_TIME_MS) {
-            if (currentMode === MODE.MIXER) {
-                launchScene(buttonIndex);
-            } else if (currentMode === MODE.PLAY) {
-                launchClipOnSelectedChild(buttonIndex);
-            }
-        }
-        
-        lowerButtonPressTime[buttonIndex] = null;
+    if (currentMode === MODE.MIXER) {
+        launchScene(buttonIndex);
+    } else if (currentMode === MODE.PLAY) {
+        launchClipOnSelectedChild(buttonIndex);
     }
 }
 
 function launchScene(sceneIndex) {
-    if (!pinnedTrackIsGroup) {
-        if (DEBUG) {
-            host.println(`Cannot launch scene - not in group mode`);
-        }
-        return;
-    }
-    
     if (sceneIndex < 0 || sceneIndex > 7) {
         if (DEBUG) {
             host.println(`Invalid scene index: ${sceneIndex}`);
@@ -377,31 +334,15 @@ function launchScene(sceneIndex) {
         return;
     }
     
-    const clipSlotBank = childTrackClipLauncherSlotBanks[selectedChildIndex];
-    if (!clipSlotBank) {
+    const scene = sceneBank.getScene(sceneIndex);
+    if (scene) {
         if (DEBUG) {
-            host.println(`Clip launcher not available for active child ${selectedChildIndex}`);
+            host.println(`Launching scene ${sceneIndex + 1}`);
         }
-        return;
-    }
-    
-    const childTrack = childTracks[selectedChildIndex];
-    if (!childTrack || !childTrack.exists().get()) {
-        if (DEBUG) {
-            host.println(`Active child track ${selectedChildIndex} does not exist`);
-        }
-        return;
-    }
-    
-    const clipSlot = clipSlotBank.getItemAt(sceneIndex);
-    if (clipSlot && clipSlot.hasContent().get()) {
-        clipSlot.launch();
-        if (DEBUG) {
-            host.println(`Launched clip on active child ${selectedChildIndex} (${childTrack.name().get()}), scene ${sceneIndex + 1}`);
-        }
+        scene.launch();
     } else {
         if (DEBUG) {
-            host.println(`No clip at scene ${sceneIndex + 1} on active child ${selectedChildIndex}`);
+            host.println(`Scene ${sceneIndex} does not exist`);
         }
     }
 }
@@ -433,32 +374,6 @@ function launchClipOnSelectedChild(slotIndex) {
         if (DEBUG) {
             host.println(`Clip slot ${slotIndex} does not exist on child ${selectedChildIndex}`);
         }
-    }
-}
-
-function stopClipOnSelectedChild(slotIndex) {
-    const clipSlotBank = childTrackClipLauncherSlotBanks[selectedChildIndex];
-    if (!clipSlotBank) {
-        if (DEBUG) {
-            host.println(`Clip launcher not available for child ${selectedChildIndex}`);
-        }
-        return;
-    }
-    
-    const childTrack = childTracks[selectedChildIndex];
-    if (!childTrack || !childTrack.exists().get()) {
-        if (DEBUG) {
-            host.println(`Child track ${selectedChildIndex} does not exist`);
-        }
-        return;
-    }
-    
-    const clipSlot = clipSlotBank.getItemAt(slotIndex);
-    if (clipSlot && clipSlot.isPlaying().get()) {
-        if (DEBUG) {
-            host.println(`Stopping clip slot ${slotIndex} on child track ${selectedChildIndex}: ${childTrack.name().get()}`);
-        }
-        childTrack.stop();
     }
 }
 
@@ -531,16 +446,6 @@ function selectChildTrackExclusive(childIndex) {
             if (DEBUG) {
                 host.println(`  Child ${i} (${childTracks[i].name().get()}): mute=${shouldMute}`);
             }
-            
-            if (shouldMute) {
-                const trackToStop = childTracks[i];
-                host.scheduleTask(function() {
-                    trackToStop.stop();
-                    if (DEBUG) {
-                        host.println(`  Stopped clips on muted child ${i} (${trackToStop.name().get()})`);
-                    }
-                }, null, 100);
-            }
         }
     }
     
@@ -558,17 +463,16 @@ function handleFaderPitchBend(lsb, msb) {
         host.println(`Fader: ${faderValue.toFixed(3)} (raw=${pitchBendValue})`);
     }
     
-    if (!pinnedTrackIsGroup || !groupTrackFaderPage) {
-        return;
-    }
+    const newMode = faderValue > 0.5 ? MODE.MIXER : MODE.PLAY;
     
-    const param = groupTrackFaderPage.getParameter(0);
-    if (param && param.exists().get()) {
-        param.set(normalizedValue);
+    if (newMode !== currentMode) {
+        currentMode = newMode;
         
-        if (DEBUG && Math.random() < 0.05) {
-            host.println(`Fader -> Group Fader: ${param.name().get()} = ${normalizedValue.toFixed(2)}`);
+        if (DEBUG) {
+            host.println(`Mode switch: ${currentMode} (fader=${faderValue.toFixed(2)})`);
         }
+        
+        onModeChange();
     }
 }
 
@@ -583,27 +487,21 @@ function handleLayerButton(layer, isPressed) {
         return;
     }
     
-    if (layer === 'A') {
-        layerAActive = !layerAActive;
-        currentPageIndex = 0;
-        
-        if (DEBUG) {
-            host.println(`Layer A toggled: ${layerAActive ? 'CHILD' : 'GROUP'} - encoders now map to ${layerAActive ? 'c_perform' : 'perform'} page`);
+    if (currentMode === MODE.MIXER || currentMode === MODE.PLAY) {
+        if (layer === 'A') {
+            layerAActive = !layerAActive;
+            currentPageIndex = 0;
+            
+            if (DEBUG) {
+                host.println(`Layer A toggled: ${layerAActive ? 'CHILD' : 'GROUP'} - encoders now map to ${layerAActive ? 'c_perform' : 'perform'} page`);
+            }
+            
+            setLayerLED('A', layerAActive ? LED_STATE.ON : LED_STATE.OFF);
+            updateEncoderLEDRingsForCurrentMode();
+            updateLowerButtonLEDs();
+        } else if (layer === 'B') {
+            stopAllClipsOnSelectedChild();
         }
-        
-        setLayerLED('A', layerAActive ? LED_STATE.ON : LED_STATE.OFF);
-        updateEncoderLEDRingsForCurrentMode();
-        updateLowerButtonLEDs();
-    } else if (layer === 'B') {
-        const newMode = currentMode === MODE.PLAY ? MODE.MIXER : MODE.PLAY;
-        currentMode = newMode;
-        
-        if (DEBUG) {
-            host.println(`Mode switched to: ${currentMode}`);
-        }
-        
-        setLayerLED('B', currentMode === MODE.MIXER ? LED_STATE.ON : LED_STATE.OFF);
-        onModeChange();
     }
 }
 
@@ -621,29 +519,6 @@ function stopAllClipsOnSelectedChild() {
     }
     
     childTrack.stop();
-}
-
-function stopAllClipsInGroup() {
-    if (!pinnedTrackIsGroup) {
-        if (DEBUG) {
-            host.println(`Cannot stop clips - not in group mode`);
-        }
-        return;
-    }
-    
-    if (DEBUG) {
-        host.println(`=== Stopping all clips in group ===`);
-    }
-    
-    for (let i = 0; i < 8; i++) {
-        const childTrack = childTracks[i];
-        if (childTrack && childTrack.exists().get()) {
-            childTrack.stop();
-            if (DEBUG) {
-                host.println(`  Stopped child ${i}: ${childTrack.name().get()}`);
-            }
-        }
-    }
 }
 
 function onModeChange() {
@@ -748,24 +623,11 @@ function updateLowerButtonLEDs() {
     }
     
     if (currentMode === MODE.MIXER) {
-        const clipSlotBank = childTrackClipLauncherSlotBanks[selectedChildIndex];
-        if (clipSlotBank) {
-            for (let i = 0; i < 8; i++) {
-                const slot = clipSlotBank.getItemAt(i);
-                if (slot) {
-                    if (slot.isPlaying().get()) {
-                        setLowerButtonLED(i, LED_STATE.ON);
-                    } else if (slot.hasContent().get()) {
-                        setLowerButtonLED(i, LED_STATE.OFF);
-                    } else {
-                        setLowerButtonLED(i, LED_STATE.OFF);
-                    }
-                } else {
-                    setLowerButtonLED(i, LED_STATE.OFF);
-                }
-            }
-        } else {
-            for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 8; i++) {
+            const scene = sceneBank.getScene(i);
+            if (scene && scene.exists().get()) {
+                setLowerButtonLED(i, LED_STATE.OFF);
+            } else {
                 setLowerButtonLED(i, LED_STATE.OFF);
             }
         }
@@ -803,6 +665,8 @@ function setupTracks() {
         trackBank = host.createTrackBank(8, 0, 0, false);
         pinnedTrack = trackBank.getTrack(PINNED_TRACK_INDEX);
         
+        sceneBank = host.createSceneBank(8);
+        
         pinnedTrack.exists().markInterested();
         pinnedTrack.name().markInterested();
         pinnedTrack.isGroup().markInterested();
@@ -810,7 +674,6 @@ function setupTracks() {
         groupTrackVolumesPage = pinnedTrack.createCursorRemoteControlsPage("GroupVolumes", 8, "volumes");
         groupTrackMutesPage = pinnedTrack.createCursorRemoteControlsPage("GroupMutes", 8, "mutes");
         groupTrackPerformPage = pinnedTrack.createCursorRemoteControlsPage("GroupPerform", 8, "perform");
-        groupTrackFaderPage = pinnedTrack.createCursorRemoteControlsPage("GroupFader", 1, "fader");
         
         groupTrackDeviceBank = pinnedTrack.createDeviceBank(8);
         groupTrackPrimaryDevice = groupTrackDeviceBank.getDevice(0);
@@ -869,6 +732,7 @@ function setupTracks() {
         setupTrackObservers();
         setupRemoteControlPageObservers();
         setupClipLauncherObservers();
+        setupSceneObservers();
         
         host.scheduleTask(logTrackStatus, null, 100);
         
@@ -932,11 +796,6 @@ function setupTrackObservers() {
 }
 
 function setupRemoteControlPageObservers() {
-    const faderParam = groupTrackFaderPage.getParameter(0);
-    faderParam.exists().markInterested();
-    faderParam.name().markInterested();
-    faderParam.value().markInterested();
-    
     for (let i = 0; i < 8; i++) {
         const param = groupTrackVolumesPage.getParameter(i);
         param.exists().markInterested();
@@ -1042,31 +901,25 @@ function setupClipLauncherObservers() {
                         const buttonIndex = slotIndex;
                         
                         slot.isPlaying().addValueObserver((isPlaying) => {
-                            if (pinnedTrackIsGroup) {
-                                if (currentMode === MODE.PLAY && selectedChildIndex === childIndex) {
-                                    if (isPlaying) {
-                                        setLowerButtonLED(buttonIndex, LED_STATE.ON);
-                                    } else if (slot.hasContent().get()) {
-                                        setLowerButtonLED(buttonIndex, LED_STATE.OFF);
-                                    } else {
-                                        setLowerButtonLED(buttonIndex, LED_STATE.OFF);
-                                    }
-                                } else if (currentMode === MODE.MIXER) {
-                                    updateLowerButtonLEDs();
+                            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && 
+                                currentMode === MODE.PLAY && !layerAActive) {
+                                if (isPlaying) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.ON);
+                                } else if (slot.hasContent().get()) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
                                 }
                             }
                         });
                         
                         slot.hasContent().addValueObserver((hasContent) => {
-                            if (pinnedTrackIsGroup) {
-                                if (currentMode === MODE.PLAY && selectedChildIndex === childIndex) {
-                                    if (!hasContent) {
-                                        setLowerButtonLED(buttonIndex, LED_STATE.OFF);
-                                    } else if (!slot.isPlaying().get()) {
-                                        setLowerButtonLED(buttonIndex, LED_STATE.OFF);
-                                    }
-                                } else if (currentMode === MODE.MIXER) {
-                                    updateLowerButtonLEDs();
+                            if (pinnedTrackIsGroup && selectedChildIndex === childIndex && 
+                                currentMode === MODE.PLAY && !layerAActive) {
+                                if (!hasContent) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
+                                } else if (!slot.isPlaying().get()) {
+                                    setLowerButtonLED(buttonIndex, LED_STATE.OFF);
                                 }
                             }
                         });
@@ -1082,6 +935,36 @@ function setupClipLauncherObservers() {
     } catch (error) {
         if (DEBUG) {
             host.println(`ERROR in setupClipLauncherObservers: ${error}`);
+        }
+    }
+}
+
+function setupSceneObservers() {
+    if (DEBUG) {
+        host.println("Setting up scene observers...");
+    }
+    
+    try {
+        for (let i = 0; i < 8; i++) {
+            const scene = sceneBank.getScene(i);
+            const sceneIndex = i;
+            
+            scene.exists().markInterested();
+            
+            scene.exists().addValueObserver((exists) => {
+                if (currentMode === MODE.MIXER) {
+                    updateLowerButtonLEDs();
+                }
+            });
+        }
+        
+        if (DEBUG) {
+            host.println("Scene observers setup complete");
+        }
+        
+    } catch (error) {
+        if (DEBUG) {
+            host.println(`ERROR in setupSceneObservers: ${error}`);
         }
     }
 }

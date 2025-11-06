@@ -4,11 +4,9 @@ Bitwig Studio controller script for Behringer X-Touch Mini in Mackie Control mod
 
 ## Overview
 
-This script provides two distinct modes controlled by the **Layer B button**:
-- **PLAY mode** (Layer B OFF): Performance and clip launching
-- **MIXER mode** (Layer B ON): Volume and mute control
-
-The **fader** is mapped to a remote control parameter tagged `fader` on the GROUP TRACK.
+This script provides two distinct modes controlled by the fader position:
+- **PLAY mode** (fader < 50%): Performance and clip launching
+- **MIXER mode** (fader > 50%): Volume and mute control
 
 The script is designed to work with a **GROUP TRACK** as the pinned track (Track 1 by default).
 
@@ -24,11 +22,7 @@ The script is designed to work with a **GROUP TRACK** as the pinned track (Track
 
 3. Pin the controller to a Group Track (Track 1 by default)
 
-## Fader
-
-The fader is mapped to the first parameter on a remote control page tagged `fader` on the GROUP TRACK. This allows you to control any parameter (e.g., master volume, mix level, send amount) from the hardware fader.
-
-## MIXER Mode (Layer B ON)
+## MIXER Mode (Fader > 50%)
 
 ### Encoders
 
@@ -49,17 +43,10 @@ The fader is mapped to the first parameter on a remote control page tagged `fade
 - LED ON = This child is active (selected and unmuted)
 - LED OFF = This child is muted
 - Selected child is retained for all modes
-- **Resource optimization**: Muted tracks automatically stop their clips after 100ms (saves CPU)
 
 ### Lower Buttons (1-8)
-- **Press**: Launch clips 1-8 on the **currently active (selected) child track only**
-- **Long Press (1.4 seconds)**: Stop the playing clip on this slot
-  - Only works if a clip is currently playing
-  - Provides tactile control without needing Layer B
-- Only launches clips that have content
-- LED ON = This clip is playing on the active child
-- LED OFF = This clip is not playing (but may have content)
-- **Works identically in both MIXER and PLAY modes** - always launches clips on the selected child
+- Launch scenes 1-8
+- Triggers all clips in the scene across all tracks
 
 ### Layer A Button
 - Toggle between GROUP and CHILD encoder contexts (same as PLAY mode)
@@ -67,11 +54,9 @@ The fader is mapped to the first parameter on a remote control page tagged `fade
 - LED OFF = Group mode (encoders control group perform page)
 
 ### Layer B Button
-- Toggle between MIXER and PLAY modes
-- LED ON = MIXER mode
-- LED OFF = PLAY mode
+- Stop all clips on the CURRENT CHILD TRACK (same as PLAY mode)
 
-## PLAY Mode (Layer B OFF)
+## PLAY Mode (Fader < 50%)
 
 ### Encoders
 
@@ -93,10 +78,7 @@ The fader is mapped to the first parameter on a remote control page tagged `fade
 - Changes as you select different child tracks
 
 ### Lower Buttons (1-8)
-- **Press**: Launch clips 1-8 on the CURRENT CHILD TRACK
-- **Long Press (1.4 seconds)**: Stop the playing clip on this slot
-  - Only works if a clip is currently playing
-  - Provides tactile control without needing Layer B
+- Launch clips 1-8 on the CURRENT CHILD TRACK
 - LED shows clip state:
   - ON = Playing
   - OFF = Has content but not playing
@@ -109,19 +91,16 @@ The fader is mapped to the first parameter on a remote control page tagged `fade
 - When toggled, resets to page 0 (perform/device)
 
 ### Layer B Button
-- Toggle between MIXER and PLAY modes
-- LED ON = MIXER mode
-- LED OFF = PLAY mode
+- Stop all clips on the CURRENT CHILD TRACK
 
 ## Remote Control Page Tags
 
 For the script to work properly, tag your remote control pages in Bitwig:
 
 ### GROUP TRACK:
-- `fader` - Parameter controlled by the hardware fader (1 parameter)
-- `volumes` - Volume parameters for mixer mode (not currently used)
-- `mutes` - Mute parameters for mixer mode (not currently used)
-- `perform` - Performance parameters for both modes (encoders)
+- `volumes` - Volume parameters for mixer mode
+- `mutes` - Mute parameters for mixer mode
+- `perform` - Performance parameters for play mode
 - `p2` through `p7` - Additional pages (optional)
 
 ### CHILD TRACKS PRIMARY DEVICE:
@@ -153,12 +132,9 @@ To disable debug logging, set `DEBUG = false` in the script.
 
 ## Workflow Tips
 
-1. Press Layer B to toggle between MIXER and PLAY modes
-2. Use MIXER mode for track selection and mixing (exclusive select on upper buttons)
-3. Switch to PLAY mode to launch clips and control device parameters
-4. Use Layer A to switch encoder context between GROUP and CHILD track
-5. Map the fader to your most important parameter (e.g., group master volume, mix wet/dry)
-6. Long press (0.5 seconds) on any playing clip button to stop it
-7. Create multiple parameter pages (p2-p7) for extended control without leaving the controller
-8. Tag your most-used parameters with appropriate tags for quick access
+1. Use MIXER mode for quick volume and mute adjustments across your group
+2. Select child tracks in MIXER mode, then switch to PLAY mode to launch clips
+3. Use Layer A in PLAY mode to control individual child track devices
+4. Create multiple parameter pages (p2-p7) for extended control without leaving the controller
+5. Tag your most-used parameters with appropriate tags for quick access
 

@@ -1,0 +1,33 @@
+Hi. I want you to create a new script based on the existing xtm-ar script. Below I outline the new features. What I don't mention specifically means that thing should work the same as in the xtm-ar script. For example:
+- Mackie mode
+- Working in a group track
+- Track pinning
+- Led handling
+- Logging
+- Code patterns: setting up the trackbank, getting references to tracks/remote pages, remote page tagging, observers, getting devices, launching/stopping midi clips etc.
+
+Ok so here's how the script should work.
+
+- The name of the new script is xtm-ar-dual. It will be very similar to xtm-ar.
+- The key difference is that control scheme is split into two (left-right) allowing to control two tracks (CHILD1 and CHILD2) within a group with the exact same method. So you have one group track (PARENT) on the top and it has two children, which are also groups. Those children can have grandchildren (up to 4 each).
+- The Fader mapped to 'p_fader' on the parent.
+
+- In the following I describe one side (CHILD1) which should be replicated on the other.
+
+- On the top level the Controller is pinned to a GROUP TRACK (PARENT) the same as the current script. make the index 0 as default.
+- Layer A switches into Mixer mode for Track 1. upper buttons 1-4 and bottom buttons 1-4 gives us total of 8 buttons. Mixer mode works the same as in current script.
+- Encoders 1-4 map to 'c_p1' on the CHILD1 group.
+- Encoder push 1 gives c_p1, this is default.
+- Encoder push 2 gives us additional page: c_p2
+- Encoder push 3-4 control 'gc_1' and 'gc_2' on the current grandchild
+- In play mode, similar to current script, upper buttons control mutes, bottom buttons control midi clips (4-4 for each).
+
+Notice the tagging convetion change. Parent starts with p, children c, grandchildre gc
+
+Development goes in 3 phases:
+1) Initial skeleton setup, I load in bitwig and test the initial load (via debug messages).
+2) Implement Mixer mode, I test the features. This is complex; we do it step by step.
+3) Implement Play mode, I test the features. This is complex; we do it step by step.
+4) Wait for future requests
+
+Make sure you only bring over code that is actually required; do not leave dead code in the script.
