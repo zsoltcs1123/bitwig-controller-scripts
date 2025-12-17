@@ -1,0 +1,12 @@
+{
+    "name": "Launch Control XL 3 AR",
+    "vendor": "Novation",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Novation Launch Control XL 3 AR controller script",
+    "category": "Controller",
+    "hardware_vendor": "Novation",
+    "hardware_model": "Launch Control XL 3",
+    "main": "lcxl3-ar.control.js"
+}
+

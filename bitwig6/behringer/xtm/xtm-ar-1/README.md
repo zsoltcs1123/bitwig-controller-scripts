@@ -128,7 +128,7 @@ For the script to work properly, tag your remote control pages in Bitwig:
 - `c_perform` - Performance parameters for Layer A mode (encoders)
 - `c_mutes` - Mute parameters for Play mode (upper buttons)
 - `p2` through `p7` - Additional pages (optional)
-
+  
 ### Optional Child Track Tags:
 - `c_volumes` - (Reserved for future use)
 
