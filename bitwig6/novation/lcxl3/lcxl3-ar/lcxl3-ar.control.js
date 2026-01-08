@@ -17,6 +17,7 @@ const PINNED_TRACK_INDEX = 0; // Track 1 (0-indexed)
 // MIDI Channels (0-indexed)
 const CHANNEL_MODE_1 = 0; // Custom Mode 1 -> params 0,1,2
 const CHANNEL_MODE_2 = 1; // Custom Mode 2 -> params 4,5,6
+const CHANNEL_MODE_3 = 2; // Custom Mode 3 -> sends 0,1,2 on child tracks
 
 // LCXL3 Custom Mode MIDI CC mappings
 const CC = {
@@ -82,11 +83,13 @@ let childTrackBank;             // Track bank for child tracks in group
 let sceneBank;                  // Scene bank from child track bank
 let scenes = [];                // Array of Scene objects
 
-// MIDI group track (track 0 inside pinned group) for bottom buttons REC ARM
-let midiGroupTrack;             // The MIDI group track (child 0 of pinned group)
-let midiChildTrackBank;         // Track bank for child tracks inside MIDI group
-let midiChildTracks = [];       // Array of 8 child tracks in MIDI group
-let midiChildArms = [];         // Array of arm() SettableBooleanValue for each track
+// Child tracks of pinned group for bottom buttons REC ARM
+let armTracks = [];             // Array of 8 child tracks in pinned group
+let armStates = [];             // Array of arm() SettableBooleanValue for each track
+
+// Sends for Mode 3 (3 sends per child track)
+const NUM_SENDS = 3;
+let childTrackSends = [];       // 2D array: childTrackSends[trackIndex][sendIndex]
 
 function init() {
     log("LCXL3-AR - Initializing...");
@@ -201,8 +204,8 @@ function setupSceneLauncher() {
     log("Setting up scene launcher for upper buttons...");
     
     // Create child track bank from the pinned group track
-    // This gives us access to child tracks and their scenes
-    childTrackBank = pinnedTrack.createTrackBank(8, 0, NUM_SCENES, false);
+    // This gives us access to child tracks, their scenes, and sends
+    childTrackBank = pinnedTrack.createTrackBank(8, NUM_SENDS, NUM_SCENES, false);
     
     // Get the scene bank from the child track bank
     sceneBank = childTrackBank.sceneBank();
@@ -217,11 +220,22 @@ function setupSceneLauncher() {
     }
     
     // Also mark child tracks and their clip slots for LED feedback
+    // And setup sends for Mode 3
     for (let i = 0; i < 8; i++) {
         const track = childTrackBank.getItemAt(i);
         if (track) {
             track.exists().markInterested();
             track.name().markInterested();
+            
+            // Setup sends for Mode 3 (3 sends per track)
+            childTrackSends[i] = [];
+            for (let s = 0; s < NUM_SENDS; s++) {
+                const send = track.getSend(s);
+                send.exists().markInterested();
+                send.name().markInterested();
+                send.value().markInterested();
+                childTrackSends[i][s] = send;
+            }
             
             const clipSlotBank = track.clipLauncherSlotBank();
             if (clipSlotBank) {
@@ -240,31 +254,17 @@ function setupSceneLauncher() {
 }
 
 function setupMidiGroupTracks() {
-    log("Setting up MIDI group child tracks for REC ARM...");
+    log("Setting up REC ARM for group child tracks...");
     
-    // The MIDI group is track 0 inside the pinned group
-    // childTrackBank was already created in setupSceneLauncher
-    midiGroupTrack = childTrackBank.getItemAt(0);
-    
-    midiGroupTrack.exists().markInterested();
-    midiGroupTrack.name().markInterested();
-    midiGroupTrack.isGroup().markInterested();
-    
-    // Create a track bank for child tracks inside the MIDI group
-    midiChildTrackBank = midiGroupTrack.createTrackBank(8, 0, 0, false);
-    
-    // Setup each child track
+    // Use childTrackBank (already created in setupSceneLauncher) for child tracks 0-7
     for (let i = 0; i < 8; i++) {
-        const track = midiChildTrackBank.getItemAt(i);
-        midiChildTracks[i] = track;
-        
-        track.exists().markInterested();
-        track.name().markInterested();
+        const track = childTrackBank.getItemAt(i);
+        armTracks[i] = track;
         
         // Get the arm property
         const arm = track.arm();
         arm.markInterested();
-        midiChildArms[i] = arm;
+        armStates[i] = arm;
         
         // Add observer to keep LED in sync with arm state
         const buttonIndex = i;
@@ -274,10 +274,11 @@ function setupMidiGroupTracks() {
             const ledValue = isArmed ? 0 : 127;
             midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
             midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
+            midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
         });
     }
     
-    log("MIDI group tracks setup complete");
+    log("REC ARM setup complete");
 }
 
 function setupObservers() {
@@ -354,38 +355,59 @@ function onMidi(status, data1, data2) {
 }
 
 function handleCC(channel, cc, value) {
-    // Determine parameter offset based on MIDI channel
-    // Mode 1 (channel 0): params 0,1,2
-    // Mode 2 (channel 1): params 4,5,6
-    let paramOffset = 0;
-    if (channel === CHANNEL_MODE_1) {
-        paramOffset = 0;
-    } else if (channel === CHANNEL_MODE_2) {
-        paramOffset = 4;
-    } else {
-        // Ignore other channels
+    // Mode 3 (channel 2): sends 0,1,2 on child tracks
+    if (channel === CHANNEL_MODE_3) {
+        // Encoders Top Row -> Send 0 on child tracks 0-7
+        if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
+            const trackIndex = cc - CC.ENC_T1;
+            handleSendEncoder(trackIndex, 0, value);
+            return;
+        }
+        // Encoders Middle Row -> Send 1 on child tracks 0-7
+        if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
+            const trackIndex = cc - CC.ENC_M1;
+            handleSendEncoder(trackIndex, 1, value);
+            return;
+        }
+        // Encoders Bottom Row -> Send 2 on child tracks 0-7
+        if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
+            const trackIndex = cc - CC.ENC_B1;
+            handleSendEncoder(trackIndex, 2, value);
+            return;
+        }
+    }
+    
+    // Ignore channels other than Mode 1, 2, 3
+    if (channel !== CHANNEL_MODE_1 && channel !== CHANNEL_MODE_2 && channel !== CHANNEL_MODE_3) {
         return;
     }
     
-    // Encoders Top Row (CC13-CC20) -> Parameter 0 or 3 on pages 1-8
-    if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
-        const columnIndex = cc - CC.ENC_T1; // 0-7
-        handleEncoderColumn(columnIndex, paramOffset + 0, value, channel);
-        return;
-    }
-    
-    // Encoders Middle Row (CC21-CC28) -> Parameter 1 or 4 on pages 1-8
-    if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
-        const columnIndex = cc - CC.ENC_M1; // 0-7
-        handleEncoderColumn(columnIndex, paramOffset + 1, value, channel);
-        return;
-    }
-    
-    // Encoders Bottom Row (CC29-CC36) -> Parameter 2 or 5 on pages 1-8
-    if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
-        const columnIndex = cc - CC.ENC_B1; // 0-7
-        handleEncoderColumn(columnIndex, paramOffset + 2, value, channel);
-        return;
+    // Encoders for Mode 1 & 2 only (Mode 3 encoders handled above)
+    if (channel === CHANNEL_MODE_1 || channel === CHANNEL_MODE_2) {
+        // Determine parameter offset based on MIDI channel
+        // Mode 1 (channel 0): params 0,1,2
+        // Mode 2 (channel 1): params 4,5,6
+        const paramOffset = (channel === CHANNEL_MODE_1) ? 0 : 4;
+        // Encoders Top Row (CC13-CC20) -> Parameter 0 or 4 on pages 1-8
+        if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
+            const columnIndex = cc - CC.ENC_T1; // 0-7
+            handleEncoderColumn(columnIndex, paramOffset + 0, value, channel);
+            return;
+        }
+        
+        // Encoders Middle Row (CC21-CC28) -> Parameter 1 or 5 on pages 1-8
+        if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
+            const columnIndex = cc - CC.ENC_M1; // 0-7
+            handleEncoderColumn(columnIndex, paramOffset + 1, value, channel);
+            return;
+        }
+        
+        // Encoders Bottom Row (CC29-CC36) -> Parameter 2 or 6 on pages 1-8
+        if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
+            const columnIndex = cc - CC.ENC_B1; // 0-7
+            handleEncoderColumn(columnIndex, paramOffset + 2, value, channel);
+            return;
+        }
     }
     
     // Faders -> 'volumes' page param 0 on ALL chain primary devices
@@ -470,11 +492,12 @@ function handleStopButton(channel) {
         const cc = CC.BTN_U1 + i;
         midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, 127);
         midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, 127);
+        midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, 127);
     }
 }
 
 /**
- * Handle bottom button press - toggle REC ARM on MIDI group child tracks
+ * Handle bottom button press - toggle REC ARM on group child tracks
  * @param {number} buttonIndex - Button index 0-7
  */
 function handleBottomButton(buttonIndex) {
@@ -483,13 +506,13 @@ function handleBottomButton(buttonIndex) {
         return;
     }
     
-    const track = midiChildTracks[buttonIndex];
+    const track = armTracks[buttonIndex];
     if (!track || !track.exists().get()) {
-        log(`Bottom button ${buttonIndex + 1}: no MIDI child track at index`);
+        log(`Bottom button ${buttonIndex + 1}: no child track at index`);
         return;
     }
     
-    const arm = midiChildArms[buttonIndex];
+    const arm = armStates[buttonIndex];
     if (!arm) {
         log(`Bottom button ${buttonIndex + 1}: no arm control`);
         return;
@@ -529,9 +552,10 @@ function updateUpperButtonLEDs() {
         // LCXL3: 0 = LED ON, 127 = LED OFF (inverted)
         const ledValue = anyPlaying ? 0 : 127;
         
-        // Send on both channels
+        // Send on all channels
         midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
         midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
+        midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
     }
 }
 
@@ -550,9 +574,10 @@ function updateUpperButtonLEDsForLaunch(pressedIndex) {
         // LCXL3: 0 = LED ON, 127 = LED OFF (inverted)
         const ledValue = (i === pressedIndex) ? 0 : 127;
         
-        // Send on both channels for consistency
+        // Send on all channels
         midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
         midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
+        midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
     }
 }
 
@@ -595,6 +620,40 @@ function handleFader(faderIndex, value) {
 }
 
 /**
+ * Handle send encoder input for Mode 3
+ * @param {number} trackIndex - Child track index 0-7
+ * @param {number} sendIndex - Send index 0-2
+ * @param {number} value - MIDI CC value (0-127 absolute)
+ */
+function handleSendEncoder(trackIndex, sendIndex, value) {
+    if (!pinnedTrackIsGroup) {
+        log(`Send encoder track ${trackIndex + 1} send ${sendIndex}: ignored (not a group track)`);
+        return;
+    }
+    
+    const sends = childTrackSends[trackIndex];
+    if (!sends) {
+        log(`Send encoder track ${trackIndex + 1}: no sends array`);
+        return;
+    }
+    
+    const send = sends[sendIndex];
+    if (!send || !send.exists().get()) {
+        log(`Send encoder track ${trackIndex + 1} send ${sendIndex}: send doesn't exist`);
+        return;
+    }
+    
+    // Handle as absolute encoder (0-127 -> 0.0-1.0) with faster response curve
+    const linear = value / 127.0;
+    const normalizedValue = Math.pow(linear, 0.2);
+    send.set(normalizedValue);
+    
+    if (DEBUG && Math.random() < 0.1) {
+        host.println(`[M3] Track ${trackIndex + 1} Send ${sendIndex + 1}: ${send.name().get()} = ${normalizedValue.toFixed(2)}`);
+    }
+}
+
+/**
  * Handle encoder input for a specific column and parameter index
  * @param {number} columnIndex - Column index 0-7 (maps to pages '1'-'8')
  * @param {number} paramIndex - Parameter index 0-5 (Mode 1: 0,1,2 / Mode 2: 3,4,5)
@@ -619,8 +678,10 @@ function handleEncoderColumn(columnIndex, paramIndex, value, channel) {
         return;
     }
     
-    // Handle as absolute encoder (0-127 -> 0.0-1.0)
-    const normalizedValue = value / 127.0;
+    // Handle as absolute encoder (0-127 -> 0.0-1.0) with faster response curve
+    const linear = value / 127.0;
+    // Power curve < 1 makes response faster (reaches higher values sooner)
+    const normalizedValue = Math.pow(linear, 0.7);
     param.set(normalizedValue);
     
     if (DEBUG && Math.random() < 0.1) { // Log 10% of the time to reduce spam
