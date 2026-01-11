@@ -16,3 +16,7 @@ Always assume track pinning in new scripts, unless explicitly told otherwise.
 Tags are a great little trick I found to access more than 8 parameters without relying on page switching which is unreliable. We create the remote control pages in the script with specific tags and then I mark the pages with those tags on the GUI.
 An example of how this works can be found in the script `@./bitwig6/novation/lcxl3/lcxl3-ar.control.js`
 
+## Clip/Scene launching
+
+Clip/Scene launching is a bit tricky with the Bitwig APi.
+You can find a working example in the script `@./bitwig6/novation/lcxl3/lcxl3-ar.control.js`.

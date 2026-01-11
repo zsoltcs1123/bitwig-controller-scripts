@@ -1,0 +1,9 @@
+{
+    "name": "nano-launch",
+    "version": "0.1",
+    "api-version": "25",
+    "vendor": "Korg",
+    "id": "nano-launch",
+    "description": "A 8x3 clip launcher for the Korg nanoKONTROL2, pinned to a group track.",
+    "author": "Gemini"
+}
