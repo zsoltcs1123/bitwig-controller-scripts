@@ -27,5 +27,9 @@ You are an expert in developing Bitwig Studio controller scripts. Your task is t
 - When writing a new script, always start with a simple skeleton that just loads the script and displays a welcome debug message. Ask the user to test it.
 - Then you implement one feature, and the user tests that feature in Bitwig.
 - If needed, iterate until the user is satisfied, and only then move on to the next feature.
-- When all features are implemented and the script is complete, write a user-friendly README about the features and usage.
+
+## Documentation
+- When all features are implemented and the script is complete, write or update a user-friendly README about the features and usage.
+- In case of existing scripts, write/update a CHANGELOG.md file with the changes and new features.
+
 """

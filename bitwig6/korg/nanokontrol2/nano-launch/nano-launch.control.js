@@ -24,18 +24,25 @@ const CC_TRANS_BUTTONS = [CC_TRANS_REW, CC_TRANS_FF, CC_TRANS_STOP, CC_TRANS_PLA
 
 const CC_PREV_TRACK = 58; // Mode Toggle Button
 const CC_NEXT_TRACK = 59; // Clip Page Toggle Button
+const CC_CYCLE = 46;      // Chain/Bank Link Toggle
 
 const CC_MARKER_SET = 60;
 const CC_MARKER_PREV = 61;
 const CC_MARKER_NEXT = 62;
 
+const CC_KNOBS = [16, 17, 18, 19, 20, 21, 22, 23];
+const CC_FADERS = [0, 1, 2, 3, 4, 5, 6, 7];
+
 const PINNED_TRACK_INDEX = 0;
 const NUM_TRACKS = 8;
-const NUM_CLIPS = 6; // Increased to 6 for 2 pages
+const BANK_SIZE = 3; // Can be 3 or 6
+const NUM_CLIPS = 5 * BANK_SIZE; 
 
 let midiIn, midiOut;
 let trackBank;
 let pinnedTrack;
+let groupTrackRemoteControls;
+let groupTrackVolControls;
 let childTrackBank;
 let sceneBank;
 let childTrackSlots = []; // 2D array for [track][clip]
@@ -44,6 +51,14 @@ let groupTrackChainSelector;
 
 let isInstrumentSwitchMode = false;
 let isClipPage2 = false;
+let isChainLinkedToBank = false;
+let currentBank = 0; // 0 to 4
+
+function getTotalOffset() {
+    const bankOffset = currentBank * BANK_SIZE;
+    const pageOffset = (BANK_SIZE === 6 && isClipPage2) ? 3 : 0;
+    return bankOffset + pageOffset;
+}
 
 function init() {
     midiIn = host.getMidiInPort(0);
@@ -57,15 +72,31 @@ function init() {
     pinnedTrack.exists().markInterested();
     pinnedTrack.isGroup().markInterested();
 
+    // Group Track Remote Controls (Performance Page)
+    groupTrackRemoteControls = pinnedTrack.createCursorRemoteControlsPage("perform", 8, "perform");
+    for (let i = 0; i < 8; i++) {
+        groupTrackRemoteControls.getParameter(i).markInterested();
+        groupTrackRemoteControls.getParameter(i).setIndication(true);
+    }
+
+    // Group Track Remote Controls (Volume Page)
+    groupTrackVolControls = pinnedTrack.createCursorRemoteControlsPage("vols", 8, "vols");
+    for (let i = 0; i < 8; i++) {
+        groupTrackVolControls.getParameter(i).markInterested();
+        groupTrackVolControls.getParameter(i).setIndication(true);
+    }
+
     // Group Track Chain Selector (Primary Device)
     const groupDevice = pinnedTrack.createDeviceBank(1).getDevice(0);
     groupTrackChainSelector = groupDevice.createChainSelector();
     groupTrackChainSelector.exists().markInterested();
     groupTrackChainSelector.activeChainIndex().markInterested();
     
-    // Add observer for Transport LED feedback
+    // Add observer for Transport LED feedback (Instrument Mode)
     groupTrackChainSelector.activeChainIndex().addValueObserver((index) => {
-        updateTransportLeds(index);
+        if (isInstrumentSwitchMode) {
+            updateTransportLeds();
+        }
     });
 
     // Create a bank for the child tracks of the pinned group track
@@ -105,8 +136,9 @@ function init() {
 
     // Turn off all LEDs on init
     turnOffAllLeds();
+    updateTransportLeds(); // Initialize Bank LEDs
 
-    host.println("nano-launch: Initialized with 8x3 clip launcher grid.");
+    host.println("nano-launch: Initialized with 8x3 clip launcher grid (5 Banks).");
 }
 
 const LONG_PRESS_DELAY = 500; // ms
@@ -132,15 +164,64 @@ function onMidi(status, data1, data2) {
 
             // Handle NEXT_TRACK as Clip Page Toggle
             if (data1 === CC_NEXT_TRACK) {
-                isClipPage2 = !isClipPage2;
-                refreshGridLeds();
-                host.println("Clip Page 2: " + (isClipPage2 ? "ON (Clips 4-6)" : "OFF (Clips 1-3)"));
+                if (BANK_SIZE === 6) {
+                    isClipPage2 = !isClipPage2;
+                    refreshGridLeds();
+                    host.println("Clip Page 2: " + (isClipPage2 ? "ON" : "OFF"));
+                } else {
+                    host.println("Page switching disabled (Bank Size is 3)");
+                }
+                return;
+            }
+
+            // Handle CYCLE as Chain/Bank Link Toggle
+            if (data1 === CC_CYCLE) {
+                isChainLinkedToBank = !isChainLinkedToBank;
+                updateCycleLed();
+                updateTransportLeds(); // Refresh Indicators
+                host.println("Chain/Bank Link: " + (isChainLinkedToBank ? "ON" : "OFF"));
+                return;
+            }
+
+            // Handle Knobs (Group Track Performance Page)
+            const knobIndex = CC_KNOBS.indexOf(data1);
+            if (knobIndex !== -1) {
+                if (groupTrackRemoteControls) {
+                    // Normalize 0-127 to 0.0-1.0
+                    const normalizedValue = data2 / 127.0;
+                    groupTrackRemoteControls.getParameter(knobIndex).set(normalizedValue);
+                }
+                return;
+            }
+
+            // Handle Faders (Group Track Volume Page)
+            const faderIndex = CC_FADERS.indexOf(data1);
+            if (faderIndex !== -1) {
+                if (groupTrackVolControls) {
+                    // Normalize 0-127 to 0.0-1.0
+                    const normalizedValue = data2 / 127.0;
+                    groupTrackVolControls.getParameter(faderIndex).set(normalizedValue);
+                }
+                return;
+            }
+
+            // Handle Transport Buttons
+            const transIndex = CC_TRANS_BUTTONS.indexOf(data1);
+            if (transIndex !== -1) {
+                if (isInstrumentSwitchMode) {
+                    setChainOnAllTracks(transIndex);
+                } else {
+                    currentBank = transIndex;
+                    updateTransportLeds();
+                    refreshGridLeds();
+                    host.println("Switched to Bank " + (currentBank + 1));
+                }
                 return;
             }
 
             // Handle Scene Launching (Marker Buttons)
             if (data1 === CC_MARKER_SET || data1 === CC_MARKER_PREV || data1 === CC_MARKER_NEXT) {
-                const baseIndex = isClipPage2 ? 3 : 0;
+                const baseIndex = getTotalOffset();
                 let sceneOffset = 0;
                 
                 if (data1 === CC_MARKER_SET) sceneOffset = 0;
@@ -152,6 +233,10 @@ function onMidi(status, data1, data2) {
                 if (sceneBank) {
                     const scene = sceneBank.getScene(sceneIndex);
                     if (scene && scene.exists().get()) {
+                        // If Link is active, sync chain to current bank
+                        if (isChainLinkedToBank) {
+                            setChainOnAllTracks(currentBank);
+                        }
                         scene.launch();
                         host.println("Launching Scene " + (sceneIndex + 1));
                     } else {
@@ -159,27 +244,6 @@ function onMidi(status, data1, data2) {
                     }
                 }
                 return;
-            }
-
-            // Handle Transport Buttons (Only if Mode is Active)
-            if (isInstrumentSwitchMode) {
-                switch (data1) {
-                    case CC_TRANS_REW:
-                        setChainOnAllTracks(0);
-                        return;
-                    case CC_TRANS_FF:
-                        setChainOnAllTracks(1);
-                        return;
-                    case CC_TRANS_STOP:
-                        setChainOnAllTracks(2);
-                        return;
-                    case CC_TRANS_PLAY:
-                        setChainOnAllTracks(3);
-                        return;
-                    case CC_TRANS_REC:
-                        setChainOnAllTracks(4);
-                        return;
-                }
             }
             
             // If not handled above, pass to grid handler
@@ -213,19 +277,19 @@ function setChainOnAllTracks(chainIndex) {
 function getClipInfoFromCC(cc) {
     let trackIndex = -1;
     let clipIndex = -1;
-    const pageOffset = isClipPage2 ? 3 : 0;
+    const totalOffset = getTotalOffset();
 
     // Check S buttons
     trackIndex = CC_S_BUTTONS.indexOf(cc);
     if (trackIndex !== -1) {
-        clipIndex = 0 + pageOffset; // First visible clip
+        clipIndex = 0 + totalOffset; // First visible clip
     }
 
     // Check M buttons if not found yet
     if (trackIndex === -1) {
         trackIndex = CC_M_BUTTONS.indexOf(cc);
         if (trackIndex !== -1) {
-            clipIndex = 1 + pageOffset; // Second visible clip
+            clipIndex = 1 + totalOffset; // Second visible clip
         }
     }
 
@@ -233,7 +297,7 @@ function getClipInfoFromCC(cc) {
     if (trackIndex === -1) {
         trackIndex = CC_R_BUTTONS.indexOf(cc);
         if (trackIndex !== -1) {
-            clipIndex = 2 + pageOffset; // Third visible clip
+            clipIndex = 2 + totalOffset; // Third visible clip
         }
     }
 
@@ -267,6 +331,9 @@ function handleButton(cc, value) {
                 }, LONG_PRESS_DELAY);
             } else {
                 // Clip not playing: Launch immediately
+                if (isChainLinkedToBank) {
+                    setChainOnAllTracks(currentBank);
+                }
                 clip.launch();
                 host.println("Launching Track " + (trackIndex + 1) + ", Clip " + (clipIndex + 1));
             }
@@ -282,6 +349,9 @@ function handleButton(cc, value) {
             // then this is a short press on a playing clip -> Re-trigger
             if (!buttonStates[cc].handled) {
                 if (clip.exists().get()) {
+                    if (isChainLinkedToBank) {
+                        setChainOnAllTracks(currentBank);
+                    }
                     clip.launch();
                     host.println("Re-triggering Track " + (trackIndex + 1) + ", Clip " + (clipIndex + 1));
                 }
@@ -309,13 +379,12 @@ function checkLongPress(cc) {
 }
 
 function updateLed(trackIndex, clipIndex, isPlaying) {
-    // Determine which page is currently active
-    const pageOffset = isClipPage2 ? 3 : 0;
+    const totalOffset = getTotalOffset();
     
-    // Check if the updating clip is on the current page
-    if (clipIndex >= pageOffset && clipIndex < pageOffset + 3) {
+    // Check if the updating clip is on the current page/bank
+    if (clipIndex >= totalOffset && clipIndex < totalOffset + 3) {
         // Map to visible button index (0, 1, 2)
-        const visibleIndex = clipIndex - pageOffset;
+        const visibleIndex = clipIndex - totalOffset;
         
         let cc = -1;
         switch (visibleIndex) {
@@ -333,19 +402,16 @@ function updateLed(trackIndex, clipIndex, isPlaying) {
         if (cc !== -1) {
             const value = isPlaying ? 127 : 0;
             midiOut.sendMidi(0xB0, cc, value);
-            if (DEBUG) {
-                // host.println("LED: Track " + (trackIndex + 1) + ", Clip " + (clipIndex + 1) + " -> " + (isPlaying ? "ON" : "OFF"));
-            }
         }
     }
 }
 
 function refreshGridLeds() {
-    const pageOffset = isClipPage2 ? 3 : 0;
+    const totalOffset = getTotalOffset();
     
     for (let i = 0; i < NUM_TRACKS; i++) {
         for (let j = 0; j < 3; j++) {
-            const clipIndex = j + pageOffset;
+            const clipIndex = j + totalOffset;
             const clip = childTrackSlots[i][clipIndex];
             if (clip) {
                 // Manually trigger the LED update logic
@@ -353,6 +419,10 @@ function refreshGridLeds() {
             }
         }
     }
+}
+
+function updateCycleLed() {
+    midiOut.sendMidi(0xB0, CC_CYCLE, isChainLinkedToBank ? 127 : 0);
 }
 
 function updateModeLeds() {
@@ -368,18 +438,23 @@ function updateModeLeds() {
 }
 
 function updateTransportLeds(activeIndex) {
-    // If mode is OFF, force all transport LEDs OFF
-    if (!isInstrumentSwitchMode) {
-        for (let i = 0; i < CC_TRANS_BUTTONS.length; i++) {
-            midiOut.sendMidi(0xB0, CC_TRANS_BUTTONS[i], 0);
+    let targetIndex = -1;
+
+    if (isInstrumentSwitchMode) {
+        // Show active Instrument Chain
+        if (typeof activeIndex !== 'undefined') {
+            targetIndex = activeIndex;
+        } else if (groupTrackChainSelector.exists().get()) {
+            targetIndex = groupTrackChainSelector.activeChainIndex().get();
         }
-        return;
+    } else {
+        // Show active MIDI Bank
+        targetIndex = currentBank;
     }
 
-    // Otherwise show active chain
     for (let i = 0; i < CC_TRANS_BUTTONS.length; i++) {
         const cc = CC_TRANS_BUTTONS[i];
-        const value = (i === activeIndex) ? 127 : 0;
+        const value = (i === targetIndex) ? 127 : 0;
         midiOut.sendMidi(0xB0, cc, value);
     }
 }
@@ -394,6 +469,7 @@ function turnOffAllLeds() {
         midiOut.sendMidi(0xB0, CC_TRANS_BUTTONS[i], 0);
     }
     midiOut.sendMidi(0xB0, CC_PREV_TRACK, 0); // Turn off Mode Toggle LED
+    midiOut.sendMidi(0xB0, CC_CYCLE, 0);      // Turn off Link Toggle LED
     if (DEBUG) {
         host.println("All LEDs turned off.");
     }

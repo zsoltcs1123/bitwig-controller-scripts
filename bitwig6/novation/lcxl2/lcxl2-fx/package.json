@@ -1,0 +1,9 @@
+{
+    "name": "lcxl2-fx",
+    "version": "0.1.0",
+    "description": "Bitwig controller script for Novation Launch Control XL 2 - FX Controller",
+    "main": "lcxl2-fx.control.js",
+    "scripts": {},
+    "author": "Zsolt",
+    "license": "ISC"
+}
