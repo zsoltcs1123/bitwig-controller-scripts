@@ -25,6 +25,47 @@ const CONTROL = {
     PERF_FADERS: [77, 78, 79, 80, 81] // First 5 faders
 };
 
+// Button CCs for Chain Selection
+const CHAIN_BUTTONS = [
+    // FX Track 1 (Green) - Cols 1-2
+    { trackIndex: 0, chainIndex: 0, cc: 41 }, // Top 1
+    { trackIndex: 0, chainIndex: 1, cc: 42 }, // Top 2
+    { trackIndex: 0, chainIndex: 2, cc: 73 }, // Bot 1
+    { trackIndex: 0, chainIndex: 3, cc: 74 }, // Bot 2
+    
+    // FX Track 2 (Orange) - Cols 3-4
+    { trackIndex: 1, chainIndex: 0, cc: 43 }, // Top 3
+    { trackIndex: 1, chainIndex: 1, cc: 44 }, // Top 4
+    { trackIndex: 1, chainIndex: 2, cc: 75 }, // Bot 3
+    { trackIndex: 1, chainIndex: 3, cc: 76 }, // Bot 4
+    
+    // FX Track 3 (Amber) - Cols 5-6
+    { trackIndex: 2, chainIndex: 0, cc: 57 }, // Top 5
+    { trackIndex: 2, chainIndex: 1, cc: 58 }, // Top 6
+    { trackIndex: 2, chainIndex: 2, cc: 89 }, // Bot 5
+    { trackIndex: 2, chainIndex: 3, cc: 90 }, // Bot 6
+
+    // Last FX Track (Red) - Cols 7-8
+    { trackIndex: 3, chainIndex: 0, cc: 59 }, // Top 7
+    { trackIndex: 3, chainIndex: 1, cc: 60 }, // Top 8
+    { trackIndex: 3, chainIndex: 2, cc: 91 }, // Bot 7
+    { trackIndex: 3, chainIndex: 3, cc: 92 }, // Bot 8
+];
+
+// LED Colors (Novation LCXL)
+const LED = {
+    OFF: 12,
+    RED_LOW: 13,
+    RED_HIGH: 15,
+    GREEN_LOW: 28,
+    GREEN_HIGH: 60,
+    ORANGE_LOW: 30,  // Red 2, Green 1
+    ORANGE_HIGH: 47, // Red 3, Green 2
+    AMBER_LOW: 29,   // Red 1, Green 1
+    AMBER_HIGH: 63   // Red 3, Green 3
+};
+
+let midiOut;
 let effectTrackBank;
 let fx1PerfPage;
 let fx2PerfPage;
@@ -32,8 +73,14 @@ let fx3PerfPage;
 let lastFXTrackBank;
 let lastFXPerfPage;
 
+// Chain Selection
+let fxChainSelectors = []; // Array of ChainSelector
+let activeChainIndices = [0, 0, 0, 0]; // [trackIndex] -> current active chain index
+let chainCounts = [0, 0, 0, 0];        // [trackIndex] -> number of chains
+
 function init() {
     host.getMidiInPort(0).setMidiCallback(onMidi);
+    midiOut = host.getMidiOutPort(0);
     
     // Create bank for first 3 effect tracks
     effectTrackBank = host.createEffectTrackBank(3, 3, 0);
@@ -47,6 +94,27 @@ function init() {
         for (let s = 0; s < 3; s++) {
             track.getSend(s).markInterested();
         }
+
+        // Setup Chain Selector (assume first device is the selector)
+        const deviceBank = track.createDeviceBank(1);
+        const device = deviceBank.getDevice(0);
+        
+        // Use ChainSelector to control active chain
+        const chainSelector = device.createChainSelector();
+        fxChainSelectors[i] = chainSelector;
+        
+        chainSelector.exists().markInterested();
+        chainSelector.chainCount().markInterested();
+        chainSelector.activeChainIndex().markInterested();
+
+        // Observers
+        chainSelector.activeChainIndex().addValueObserver(function(index) {
+            activeChainIndices[i] = index;
+        });
+
+        chainSelector.chainCount().addValueObserver(function(count) {
+            chainCounts[i] = count;
+        });
     }
 
     // Setup 'perf' page for FX Track 1
@@ -64,7 +132,7 @@ function init() {
     fx3PerfPage = fx3.createCursorRemoteControlsPage("fx3_perf", 4, "perf");
     for (let i = 0; i < 4; i++) fx3PerfPage.getParameter(i).markInterested();
 
-    // Setup 'perf' page for the ABSOLUTE LAST FX track
+    // Setup for the ABSOLUTE LAST FX track
     // We create a bank of 1 track and scroll it to the end
     lastFXTrackBank = host.createEffectTrackBank(1, 0, 0);
     
@@ -75,15 +143,39 @@ function init() {
 
     const lastFX = lastFXTrackBank.getItemAt(0);
     lastFX.name().markInterested();
-    lastFXPerfPage = lastFX.createCursorRemoteControlsPage("last_fx_perf", 5, "perf");
+    
+    // Access the first device on the Last FX Track
+    const lastFXDeviceBank = lastFX.createDeviceBank(1);
+    const lastFXDevice = lastFXDeviceBank.getDevice(0);
+    lastFXDevice.exists().markInterested();
+    
+    // Setup Perf Page on the DEVICE
+    lastFXPerfPage = lastFXDevice.createCursorRemoteControlsPage("last_fx_device_perf", 5, "perf");
     for (let i = 0; i < 5; i++) lastFXPerfPage.getParameter(i).markInterested();
+
+    // Setup Chain Selector for the Last FX Device
+    const lastFXChainSelector = lastFXDevice.createChainSelector();
+    fxChainSelectors[3] = lastFXChainSelector; // Index 3 for Last FX
+    
+    lastFXChainSelector.exists().markInterested();
+    lastFXChainSelector.chainCount().markInterested();
+    lastFXChainSelector.activeChainIndex().markInterested();
+
+    lastFXChainSelector.activeChainIndex().addValueObserver(function(index) {
+        activeChainIndices[3] = index;
+    });
+
+    lastFXChainSelector.chainCount().addValueObserver(function(count) {
+        chainCounts[3] = count;
+    });
 
     host.println("LCXL2-FX - Initialized!");
     host.println("Controlling first 3 Effect Tracks via LCXL2 Channels 6, 7, 8");
     host.println("Top row knobs 1-4 mapped to FX1 'perf' page");
     host.println("Middle row knobs 1-4 mapped to FX2 'perf' page");
     host.println("Bottom row knobs 1-4 mapped to FX3 'perf' page");
-    host.println("Faders 1-5 mapped to the LAST FX track 'perf' page");
+    host.println("Faders 1-5 mapped to the LAST FX track's DEVICE 'perf' page");
+    host.println("Bottom buttons control FX Chain selection (Green/Orange/Amber/Red)");
 }
 
 function onMidi(status, data1, data2) {
@@ -94,11 +186,33 @@ function onMidi(status, data1, data2) {
 
     if (msgType === 0xB0) { // CC
         handleCC(data1, data2);
+    } else if (msgType === 0x90 || msgType === 0x80) { // Note On / Note Off
+        // Treat Note messages as buttons
+        const value = (msgType === 0x90) ? data2 : 0;
+        handleCC(data1, value);
     }
 }
 
 function handleCC(cc, value) {
     const val = value / 127.0;
+
+    // Check Chain Selection Buttons (Bottom 16)
+    // Only trigger on press (value > 0)
+    if (value > 0) {
+        for (let i = 0; i < CHAIN_BUTTONS.length; i++) {
+            const btn = CHAIN_BUTTONS[i];
+            if (cc === btn.cc) {
+                host.println(`Button Pressed: Track ${btn.trackIndex} Chain ${btn.chainIndex} (Note/CC ${cc})`);
+                
+                // Set Active Chain Index
+                const selector = fxChainSelectors[btn.trackIndex];
+                if (selector && selector.exists().get()) {
+                    selector.activeChainIndex().set(btn.chainIndex);
+                }
+                return;
+            }
+        }
+    }
 
     // Check 'perf' knobs for FX1 (Top row 1-4)
     for (let i = 0; i < 4; i++) {
@@ -160,7 +274,37 @@ function handleCC(cc, value) {
 }
 
 function flush() {
-    // Called periodically
+    // Update LEDs for Chain Selection
+    for (let i = 0; i < CHAIN_BUTTONS.length; i++) {
+        const btn = CHAIN_BUTTONS[i];
+        const selector = fxChainSelectors[btn.trackIndex];
+        
+        let color = LED.OFF;
+        
+        if (selector && selector.exists().get()) {
+            const currentIndex = activeChainIndices[btn.trackIndex];
+            const count = chainCounts[btn.trackIndex];
+            
+            // Check if this button represents an existing chain
+            if (btn.chainIndex < count) {
+                const isActive = (btn.chainIndex === currentIndex);
+                
+                // Determine Color Scheme
+                if (btn.trackIndex === 0) { // FX1: Green
+                    color = isActive ? LED.GREEN_HIGH : LED.GREEN_LOW;
+                } else if (btn.trackIndex === 1) { // FX2: Orange
+                    color = isActive ? LED.ORANGE_HIGH : LED.ORANGE_LOW;
+                } else if (btn.trackIndex === 2) { // FX3: Amber
+                    color = isActive ? LED.AMBER_HIGH : LED.AMBER_LOW;
+                } else if (btn.trackIndex === 3) { // Last FX: Red
+                    color = isActive ? LED.RED_HIGH : LED.RED_LOW;
+                }
+            }
+        }
+        
+        // Use Note On (0x90) because the buttons are configured as Notes
+        midiOut.sendMidi(0x90 + USER_CHANNEL, btn.cc, color);
+    }
 }
 
 function exit() {
