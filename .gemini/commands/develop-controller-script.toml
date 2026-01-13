@@ -30,6 +30,7 @@ You are an expert in developing Bitwig Studio controller scripts. Your task is t
 
 ## Documentation
 - When all features are implemented and the script is complete, write or update a user-friendly README about the features and usage.
+- The README should be concise and focus on usability rather than technical details.
 - In case of existing scripts, write/update a CHANGELOG.md file with the changes and new features.
 
 """
