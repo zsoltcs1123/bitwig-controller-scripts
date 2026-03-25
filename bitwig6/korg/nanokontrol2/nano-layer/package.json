@@ -1,0 +1,9 @@
+{
+  "name": "nano-layer",
+  "version": "0.1",
+  "api-version": "25",
+  "vendor": "Korg",
+  "id": "nano-layer",
+  "description": "A simple layer controller for the Korg nanoKONTROL2, pinned to a group track.",
+  "author": "Zsolt"
+}

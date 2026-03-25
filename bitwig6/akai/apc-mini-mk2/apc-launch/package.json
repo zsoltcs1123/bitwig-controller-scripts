@@ -1,0 +1,11 @@
+{
+    "name": "APC Launch",
+    "vendor": "Akai",
+    "version": "0.1.0",
+    "author": "Zsolt",
+    "description": "Akai APC Mini MK2 live performance launcher",
+    "category": "Controller",
+    "hardware_vendor": "Akai",
+    "hardware_model": "APC mini mk2",
+    "main": "apc-launch.control.js"
+}

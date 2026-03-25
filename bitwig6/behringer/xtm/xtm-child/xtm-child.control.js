@@ -46,9 +46,9 @@ const LED_STATE = {
 };
 
 const ENCODER_MODE = {
-    PERF: 'perf',
-    A: 'a',
-    B: 'b'
+    PERF: '1',
+    A: '2',
+    B: '3'
 };
 
 let midiIn, midiOut;
@@ -104,9 +104,9 @@ function setupTracks() {
         device.name().markInterested();
         
         const rcs = {
-            perf: device.createCursorRemoteControlsPage("Perf", 8, "perf"),
-            a: device.createCursorRemoteControlsPage("A", 8, "a"),
-            b: device.createCursorRemoteControlsPage("B", 8, "b"),
+            '1': device.createCursorRemoteControlsPage("1", 8, "1"),
+            '2': device.createCursorRemoteControlsPage("2", 8, "2"),
+            '3': device.createCursorRemoteControlsPage("3", 8, "3"),
             buttons: device.createCursorRemoteControlsPage("Buttons", 8, "buttons"),
             device: device,
             track: track
@@ -145,7 +145,7 @@ function reportDebugStatus() {
     host.println(`Track Exists: ${rcs.track.exists().get()} Name: ${rcs.track.name().get()}`);
     host.println(`Device Exists: ${rcs.device.exists().get()} Name: ${rcs.device.name().get()}`);
     
-    const pages = ['perf', 'a', 'b', 'buttons'];
+    const pages = ['1', '2', '3', 'buttons'];
     pages.forEach(p => {
         const page = rcs[p];
         let assignedCount = 0;
@@ -161,7 +161,7 @@ function reportDebugStatus() {
 }
 
 function setupRCObservers(rcs, trackIndex) {
-    const pages = ['perf', 'a', 'b'];
+    const pages = ['1', '2', '3'];
     pages.forEach(pageKey => {
         const page = rcs[pageKey];
         for (let j = 0; j < 8; j++) {

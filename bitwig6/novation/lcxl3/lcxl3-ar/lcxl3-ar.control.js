@@ -66,24 +66,13 @@ let primaryDevice;
 //   Param 3 is skipped/reserved
 let devicePages = []; // Array of 8 pages
 
-// Chain/Layer management for faders
-// Primary device may have chains (e.g., Instrument Selector)
-// Each chain's primary device has a 'volumes' page
-const NUM_CHAINS = 8;
-let layerBank;
-let chainLayers = [];           // Array of DeviceLayer objects
-let chainDeviceBanks = [];      // Array of DeviceBank for each chain
-let chainPrimaryDevices = [];   // Array of primary Device for each chain
-let chainVolumesPages = [];     // Array of 'volumes' remote control pages
-let hasChains = false;
+// Volumes page on primary device for faders
+let volumesPage;
 
-// Scene launcher for upper buttons (launches clips on child tracks)
-const NUM_SCENES = 8;
-let childTrackBank;             // Track bank for child tracks in group
-let sceneBank;                  // Scene bank from child track bank
-let scenes = [];                // Array of Scene objects
+// Child tracks of pinned group
+let childTrackBank;
 
-// Child tracks of pinned group for bottom buttons REC ARM
+// Bottom buttons REC ARM
 let armTracks = [];             // Array of 8 child tracks in pinned group
 let armStates = [];             // Array of arm() SettableBooleanValue for each track
 
@@ -107,9 +96,7 @@ function init() {
 function setupTracks() {
     log("Setting up track management...");
     
-    // Create track bank and pin to track
-    // Third param is numScenes - need 8 for clip slots
-    trackBank = host.createTrackBank(8, 0, NUM_SCENES, false);
+    trackBank = host.createTrackBank(8, 0, 0, false);
     pinnedTrack = trackBank.getItemAt(PINNED_TRACK_INDEX);
     
     // Mark track properties as interested
@@ -139,138 +126,62 @@ function setupTracks() {
         }
     }
     
-    // Setup chain/layer bank for faders
-    // This allows access to chains in devices like Instrument Selector
-    setupChainVolumes();
+    // Setup volumes page on primary device for faders
+    setupVolumesPage();
     
-    // Setup scene launcher for upper buttons
-    setupSceneLauncher();
-    
-    // Setup MIDI group child tracks for bottom buttons (REC ARM)
-    setupMidiGroupTracks();
+    // Setup child tracks for sends and REC ARM
+    setupChildTracks();
     
     // Setup observers
     setupObservers();
     
-    // Log initial status and initialize LEDs after a short delay
     host.scheduleTask(function() {
         logTrackStatus();
-        updateUpperButtonLEDs();
     }, 100);
 }
 
-function setupChainVolumes() {
-    log("Setting up chain volumes for faders...");
+function setupVolumesPage() {
+    log("Setting up volumes page for faders...");
     
-    // Create layer bank on primary device to access chains
-    layerBank = primaryDevice.createLayerBank(NUM_CHAINS);
+    volumesPage = primaryDevice.createCursorRemoteControlsPage("Volumes", 8, "volumes");
     
-    for (let i = 0; i < NUM_CHAINS; i++) {
-        // Get the layer/chain
-        const layer = layerBank.getItemAt(i);
-        chainLayers[i] = layer;
-        
-        layer.exists().markInterested();
-        layer.name().markInterested();
-        
-        // Create device bank on the layer to get its primary device
-        const deviceBank = layer.createDeviceBank(1);
-        chainDeviceBanks[i] = deviceBank;
-        
-        const chainDevice = deviceBank.getDevice(0);
-        chainPrimaryDevices[i] = chainDevice;
-        
-        chainDevice.exists().markInterested();
-        chainDevice.name().markInterested();
-        
-        // Create 'volumes' remote control page on the chain's primary device
-        // Need 8 parameters for 8 faders
-        const volumesPage = chainDevice.createCursorRemoteControlsPage("ChainVolumes" + i, 8, "volumes");
-        chainVolumesPages[i] = volumesPage;
-        
-        // Mark all 8 parameters as interested
-        for (let p = 0; p < 8; p++) {
-            const param = volumesPage.getParameter(p);
-            param.exists().markInterested();
-            param.name().markInterested();
-            param.value().markInterested();
-        }
+    for (let p = 0; p < 8; p++) {
+        const param = volumesPage.getParameter(p);
+        param.exists().markInterested();
+        param.name().markInterested();
+        param.value().markInterested();
     }
     
-    log("Chain volumes setup complete");
+    log("Volumes page setup complete");
 }
 
-function setupSceneLauncher() {
-    log("Setting up scene launcher for upper buttons...");
+function setupChildTracks() {
+    log("Setting up child tracks (sends + REC ARM)...");
     
-    // Create child track bank from the pinned group track
-    // This gives us access to child tracks, their scenes, and sends
-    childTrackBank = pinnedTrack.createTrackBank(8, NUM_SENDS, NUM_SCENES, false);
+    childTrackBank = pinnedTrack.createTrackBank(8, NUM_SENDS, 0, false);
     
-    // Get the scene bank from the child track bank
-    sceneBank = childTrackBank.sceneBank();
-    
-    // Setup each scene
-    for (let i = 0; i < NUM_SCENES; i++) {
-        const scene = sceneBank.getScene(i);
-        scenes[i] = scene;
+    for (let i = 0; i < 8; i++) {
+        const track = childTrackBank.getItemAt(i);
+        track.exists().markInterested();
+        track.name().markInterested();
         
-        scene.exists().markInterested();
-        scene.name().markInterested();
-    }
-    
-    // Also mark child tracks and their clip slots for LED feedback
-    // And setup sends for Mode 3
-    for (let i = 0; i < 8; i++) {
-        const track = childTrackBank.getItemAt(i);
-        if (track) {
-            track.exists().markInterested();
-            track.name().markInterested();
-            
-            // Setup sends for Mode 3 (3 sends per track)
-            childTrackSends[i] = [];
-            for (let s = 0; s < NUM_SENDS; s++) {
-                const send = track.getSend(s);
-                send.exists().markInterested();
-                send.name().markInterested();
-                send.value().markInterested();
-                childTrackSends[i][s] = send;
-            }
-            
-            const clipSlotBank = track.clipLauncherSlotBank();
-            if (clipSlotBank) {
-                for (let slotIndex = 0; slotIndex < NUM_SCENES; slotIndex++) {
-                    const slot = clipSlotBank.getItemAt(slotIndex);
-                    if (slot) {
-                        slot.isPlaying().markInterested();
-                        slot.hasContent().markInterested();
-                    }
-                }
-            }
+        childTrackSends[i] = [];
+        for (let s = 0; s < NUM_SENDS; s++) {
+            const send = track.getSend(s);
+            send.exists().markInterested();
+            send.name().markInterested();
+            send.value().markInterested();
+            childTrackSends[i][s] = send;
         }
-    }
-    
-    log("Scene launcher setup complete");
-}
-
-function setupMidiGroupTracks() {
-    log("Setting up REC ARM for group child tracks...");
-    
-    // Use childTrackBank (already created in setupSceneLauncher) for child tracks 0-7
-    for (let i = 0; i < 8; i++) {
-        const track = childTrackBank.getItemAt(i);
+        
         armTracks[i] = track;
-        
-        // Get the arm property
         const arm = track.arm();
         arm.markInterested();
         armStates[i] = arm;
         
-        // Add observer to keep LED in sync with arm state
         const buttonIndex = i;
         arm.addValueObserver(function(isArmed) {
             const cc = CC.BTN_B1 + buttonIndex;
-            // LCXL3: 0 = LED ON, 127 = LED OFF (inverted)
             const ledValue = isArmed ? 0 : 127;
             midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
             midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
@@ -278,7 +189,7 @@ function setupMidiGroupTracks() {
         });
     }
     
-    log("REC ARM setup complete");
+    log("Child tracks setup complete");
 }
 
 function setupObservers() {
@@ -303,46 +214,6 @@ function setupObservers() {
     primaryDevice.name().addValueObserver(function(name) {
         log(`Primary device name: ${name}`);
     });
-    
-    // Observe chain existence to track if device has chains
-    for (let i = 0; i < NUM_CHAINS; i++) {
-        const chainIndex = i;
-        chainLayers[i].exists().addValueObserver(function(exists) {
-            if (exists && !hasChains) {
-                hasChains = true;
-                log("Primary device has chains");
-            }
-            if (DEBUG) {
-                log(`Chain ${chainIndex} exists: ${exists}`);
-            }
-        });
-    }
-    
-    // Observe clip playing state on child tracks for LED updates
-    setupSceneObservers();
-}
-
-function setupSceneObservers() {
-    if (!childTrackBank) return;
-    
-    for (let trackIndex = 0; trackIndex < 8; trackIndex++) {
-        const track = childTrackBank.getItemAt(trackIndex);
-        if (track) {
-            const clipSlotBank = track.clipLauncherSlotBank();
-            if (clipSlotBank) {
-                for (let slotIndex = 0; slotIndex < NUM_SCENES; slotIndex++) {
-                    const slot = clipSlotBank.getItemAt(slotIndex);
-                    if (slot) {
-                        slot.isPlaying().addValueObserver((isPlaying) => {
-                            if (pinnedTrackIsGroup) {
-                                updateUpperButtonLEDs();
-                            }
-                        });
-                    }
-                }
-            }
-        }
-    }
 }
 
 function onMidi(status, data1, data2) {
@@ -410,25 +281,10 @@ function handleCC(channel, cc, value) {
         }
     }
     
-    // Faders -> 'volumes' page param 0 on ALL chain primary devices
+    // Faders -> 'volumes' page on primary device
     if (cc >= CC.FADER1 && cc <= CC.FADER8) {
         const faderIndex = cc - CC.FADER1;
         handleFader(faderIndex, value);
-        return;
-    }
-    
-    // Upper Buttons 1-7 -> Scene launcher, Button 8 -> Stop clips
-    if (cc >= CC.BTN_U1 && cc <= CC.BTN_U8) {
-        const buttonIndex = cc - CC.BTN_U1;
-        if (value > 0) { // Only on press (ON=127)
-            if (buttonIndex === 7) {
-                // Button 8 (CC44) stops all clips in the group
-                handleStopButton(channel);
-            } else {
-                // Buttons 1-7 launch scenes
-                handleUpperButton(buttonIndex, channel);
-            }
-        }
         return;
     }
     
@@ -441,65 +297,6 @@ function handleCC(channel, cc, value) {
     }
 }
 
-/**
- * Handle upper button press for scene launching
- * @param {number} buttonIndex - Button index 0-7
- * @param {number} channel - MIDI channel the message came from
- */
-function handleUpperButton(buttonIndex, channel) {
-    if (!pinnedTrackIsGroup) {
-        log(`Upper button ${buttonIndex + 1}: ignored (not a group track)`);
-        return;
-    }
-    
-    if (!sceneBank) {
-        log(`Upper button ${buttonIndex + 1}: no scene bank available`);
-        return;
-    }
-    
-    const scene = scenes[buttonIndex];
-    if (!scene) {
-        log(`Upper button ${buttonIndex + 1}: no scene at index`);
-        return;
-    }
-    
-    // Launch the scene (launches clips on all child tracks at this scene index)
-    scene.launch();
-    log(`Upper button ${buttonIndex + 1}: launching scene`);
-    
-    // In momentary mode: immediately update LEDs to show this as the active scene
-    // The observers will also update when Bitwig confirms playback
-    updateUpperButtonLEDsForLaunch(buttonIndex);
-}
-
-/**
- * Handle stop button (button 8) - stops all clips in the group
- * @param {number} channel - MIDI channel the message came from
- */
-function handleStopButton(channel) {
-    if (!pinnedTrackIsGroup) {
-        log(`Stop button: ignored (not a group track)`);
-        return;
-    }
-    
-    // Stop clips on the pinned group track (stops all child track clips)
-    pinnedTrack.stop();
-    log(`Stop button: stopping all clips in group`);
-    
-    // Turn off all scene LEDs (1-7), keep button 8 off too
-    // LCXL3: 127 = LED OFF (inverted)
-    for (let i = 0; i < NUM_SCENES; i++) {
-        const cc = CC.BTN_U1 + i;
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, 127);
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, 127);
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, 127);
-    }
-}
-
-/**
- * Handle bottom button press - toggle REC ARM on group child tracks
- * @param {number} buttonIndex - Button index 0-7
- */
 function handleBottomButton(buttonIndex) {
     if (!pinnedTrackIsGroup) {
         log(`Bottom button ${buttonIndex + 1}: ignored (not a group track)`);
@@ -523,99 +320,23 @@ function handleBottomButton(buttonIndex) {
     log(`Bottom button ${buttonIndex + 1}: toggled REC ARM on ${track.name().get()}`);
 }
 
-/**
- * Update upper button LEDs based on scene/clip playing state
- * Sends to both MIDI channels so it works regardless of current mode
- */
-function updateUpperButtonLEDs() {
-    for (let sceneIndex = 0; sceneIndex < NUM_SCENES; sceneIndex++) {
-        const cc = CC.BTN_U1 + sceneIndex;
-        let anyPlaying = false;
-        
-        // Check if any clip is playing at this scene index across all child tracks
-        if (childTrackBank) {
-            for (let trackIndex = 0; trackIndex < 8; trackIndex++) {
-                const track = childTrackBank.getItemAt(trackIndex);
-                if (track && track.exists().get()) {
-                    const clipSlotBank = track.clipLauncherSlotBank();
-                    if (clipSlotBank) {
-                        const slot = clipSlotBank.getItemAt(sceneIndex);
-                        if (slot && slot.isPlaying().get()) {
-                            anyPlaying = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // LCXL3: 0 = LED ON, 127 = LED OFF (inverted)
-        const ledValue = anyPlaying ? 0 : 127;
-        
-        // Send on all channels
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
-    }
-}
-
-/**
- * Update LEDs immediately when a button is pressed (before Bitwig responds)
- * This gives instant visual feedback for mutual exclusion
- * 
- * For MOMENTARY mode buttons: We control LEDs entirely from the script.
- * Send the desired state directly - no toggle behavior from device.
- * 
- * @param {number} pressedIndex - The button that was just pressed
- */
-function updateUpperButtonLEDsForLaunch(pressedIndex) {
-    for (let i = 0; i < NUM_SCENES; i++) {
-        const cc = CC.BTN_U1 + i;
-        // LCXL3: 0 = LED ON, 127 = LED OFF (inverted)
-        const ledValue = (i === pressedIndex) ? 0 : 127;
-        
-        // Send on all channels
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
-        midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
-    }
-}
-
-/**
- * Handle fader input - sets the same parameter on ALL chain 'volumes' pages
- * @param {number} faderIndex - Fader index 0-7
- * @param {number} value - MIDI CC value (0-127 absolute)
- */
 function handleFader(faderIndex, value) {
     if (!pinnedTrackIsGroup) {
         log(`Fader ${faderIndex + 1}: ignored (not a group track)`);
         return;
     }
     
-    const normalizedValue = value / 127.0;
-    let setCount = 0;
-    
-    // Set the parameter on ALL chains that exist
-    for (let chainIndex = 0; chainIndex < NUM_CHAINS; chainIndex++) {
-        const layer = chainLayers[chainIndex];
-        if (!layer || !layer.exists().get()) {
-            continue;
-        }
-        
-        const volumesPage = chainVolumesPages[chainIndex];
-        if (!volumesPage) {
-            continue;
-        }
-        
-        const param = volumesPage.getParameter(faderIndex);
-        if (param && param.exists().get()) {
-            param.set(normalizedValue);
-            setCount++;
-        }
+    const param = volumesPage.getParameter(faderIndex);
+    if (!param || !param.exists().get()) {
+        log(`Fader ${faderIndex + 1}: param doesn't exist`);
+        return;
     }
     
+    const normalizedValue = value / 127.0;
+    param.set(normalizedValue);
+    
     if (DEBUG && Math.random() < 0.1) {
-        log(`Fader ${faderIndex + 1} -> ${setCount} chains, value=${normalizedValue.toFixed(2)}`);
+        log(`Fader ${faderIndex + 1}: ${param.name().get()} = ${normalizedValue.toFixed(2)}`);
     }
 }
 
@@ -716,46 +437,16 @@ function logTrackStatus() {
         }
     }
     
-    // Log chain status for faders
-    log("--- Chains (for faders) ---");
-    let chainCount = 0;
-    for (let i = 0; i < NUM_CHAINS; i++) {
-        const layer = chainLayers[i];
-        if (layer && layer.exists().get()) {
-            chainCount++;
-            const chainDevice = chainPrimaryDevices[i];
-            const deviceName = chainDevice.exists().get() ? chainDevice.name().get() : "no device";
-            log(`  Chain ${i}: ${layer.name().get()} -> ${deviceName}`);
-        }
-    }
-    log(`Total chains: ${chainCount}`);
-    
-    // Log scene/clip status
-    log("--- Scenes (upper buttons) ---");
-    for (let sceneIndex = 0; sceneIndex < NUM_SCENES; sceneIndex++) {
-        let anyPlaying = false;
-        let hasAnyContent = false;
-        
-        if (childTrackBank) {
-            for (let trackIndex = 0; trackIndex < 8; trackIndex++) {
-                const track = childTrackBank.getItemAt(trackIndex);
-                if (track && track.exists().get()) {
-                    const clipSlotBank = track.clipLauncherSlotBank();
-                    if (clipSlotBank) {
-                        const slot = clipSlotBank.getItemAt(sceneIndex);
-                        if (slot) {
-                            if (slot.hasContent().get()) hasAnyContent = true;
-                            if (slot.isPlaying().get()) anyPlaying = true;
-                        }
-                    }
-                }
+    // Log volumes page status for faders
+    log("--- Volumes Page (faders) ---");
+    if (volumesPage) {
+        let paramCount = 0;
+        for (let p = 0; p < 8; p++) {
+            if (volumesPage.getParameter(p).exists().get()) {
+                paramCount++;
             }
         }
-        
-        if (hasAnyContent) {
-            const playing = anyPlaying ? " [PLAYING]" : "";
-            log(`  Scene ${sceneIndex + 1}: has content${playing}`);
-        }
+        log(`  ${paramCount}/8 params mapped`);
     }
     
     log("=============================");
