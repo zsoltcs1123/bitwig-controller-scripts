@@ -7,9 +7,9 @@ This script is designed for the Behringer X-Touch Mini to control child tracks w
 - The script is pinned to the track at index 1 (default). You can change `PINNED_TRACK_INDEX` in the script if needed.
 - Ensure your group track has child tracks.
 - Remote control pages should be tagged as follows on the first device of each child track:
-    - `perf`: Main performance controls (default encoder mode).
-    - `a`: Layer A controls.
-    - `b`: Layer B controls.
+    - `1`: Main performance controls (default encoder mode).
+    - `2`: Layer A controls.
+    - `3`: Layer B controls.
     - `buttons`: Toggle controls for the upper buttons.
 
 ## Controls
@@ -25,15 +25,15 @@ This script is designed for the Behringer X-Touch Mini to control child tracks w
 ### Encoders (1-8)
 - Controls parameters on the active remote control page.
 - **Modes**:
-    - **Default (No Layer active)**: Maps to `perf` tagged page.
-    - **Layer A active**: Maps to `a` tagged page.
-    - **Layer B active**: Maps to `b` tagged page.
+    - **Default (No Layer active)**: Maps to `1` tagged page.
+    - **Layer A active**: Maps to `2` tagged page.
+    - **Layer B active**: Maps to `3` tagged page.
 - LED Rings: Show the current parameter value.
 
 ### Layer Buttons
 - **Layer A**: Toggles Layer A mode for encoders.
 - **Layer B**: Toggles Layer B mode for encoders.
-- Note: Activating one layer deactivates the other. Deactivating an active layer returns to `perf` mode.
+- Note: Activating one layer deactivates the other. Deactivating an active layer returns to `1` mode.
 
 ### Fader
 - Does nothing (by design).

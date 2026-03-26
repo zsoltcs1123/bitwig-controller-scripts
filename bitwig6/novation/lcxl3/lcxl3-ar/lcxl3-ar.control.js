@@ -72,6 +72,9 @@ let volumesPage;
 // Child tracks of pinned group
 let childTrackBank;
 
+// Upper buttons MUTE
+let muteStates = [];            // Array of mute() SettableBooleanValue for each track
+
 // Bottom buttons REC ARM
 let armTracks = [];             // Array of 8 child tracks in pinned group
 let armStates = [];             // Array of arm() SettableBooleanValue for each track
@@ -175,11 +178,25 @@ function setupChildTracks() {
         }
         
         armTracks[i] = track;
+        
+        const buttonIndex = i;
+        
+        const mute = track.mute();
+        mute.markInterested();
+        muteStates[i] = mute;
+        
+        mute.addValueObserver(function(isMuted) {
+            const cc = CC.BTN_U1 + buttonIndex;
+            const ledValue = isMuted ? 0 : 127;
+            midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
+            midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
+            midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
+        });
+        
         const arm = track.arm();
         arm.markInterested();
         armStates[i] = arm;
         
-        const buttonIndex = i;
         arm.addValueObserver(function(isArmed) {
             const cc = CC.BTN_B1 + buttonIndex;
             const ledValue = isArmed ? 0 : 127;
@@ -288,13 +305,41 @@ function handleCC(channel, cc, value) {
         return;
     }
     
+    // Upper Buttons -> Toggle MUTE on child tracks
+    if (cc >= CC.BTN_U1 && cc <= CC.BTN_U8) {
+        const buttonIndex = cc - CC.BTN_U1;
+        handleUpperButton(buttonIndex);
+        return;
+    }
+    
     // Bottom Buttons -> Toggle REC ARM on MIDI group child tracks
-    // In toggle mode, device alternates 127/0 - we toggle on ANY message
     if (cc >= CC.BTN_B1 && cc <= CC.BTN_B8) {
         const buttonIndex = cc - CC.BTN_B1;
         handleBottomButton(buttonIndex);
         return;
     }
+}
+
+function handleUpperButton(buttonIndex) {
+    if (!pinnedTrackIsGroup) {
+        log(`Upper button ${buttonIndex + 1}: ignored (not a group track)`);
+        return;
+    }
+    
+    const track = armTracks[buttonIndex];
+    if (!track || !track.exists().get()) {
+        log(`Upper button ${buttonIndex + 1}: no child track at index`);
+        return;
+    }
+    
+    const mute = muteStates[buttonIndex];
+    if (!mute) {
+        log(`Upper button ${buttonIndex + 1}: no mute control`);
+        return;
+    }
+    
+    mute.toggle();
+    log(`Upper button ${buttonIndex + 1}: toggled MUTE on ${track.name().get()}`);
 }
 
 function handleBottomButton(buttonIndex) {
