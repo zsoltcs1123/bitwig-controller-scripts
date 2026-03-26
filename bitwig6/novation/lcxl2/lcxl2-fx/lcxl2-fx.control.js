@@ -19,9 +19,9 @@ const CONTROL = {
     KNOBS_TOP: [18, 19, 20],
     KNOBS_MID: [34, 35, 36],
     KNOBS_BOT: [54, 55, 56],
-    PERF_KNOBS: [13, 14, 15, 16], // Top row knobs 1-4
-    PERF_KNOBS_MID: [29, 30, 31, 32], // Middle row knobs 1-4
-    PERF_KNOBS_BOT: [49, 50, 51, 52], // Bottom row knobs 1-4
+    PERF_KNOBS: [13, 14, 15, 16, 17], // Top row knobs 1-5
+    PERF_KNOBS_MID: [29, 30, 31, 32, 33], // Middle row knobs 1-5
+    PERF_KNOBS_BOT: [49, 50, 51, 52, 53], // Bottom row knobs 1-5
     PERF_FADERS: [77, 78, 79, 80, 81] // First 5 faders
 };
 
@@ -65,13 +65,20 @@ const LED = {
     AMBER_HIGH: 63   // Red 3, Green 3
 };
 
+const REDO_BUTTON_CC = 0x6B; // Solo button
+const REDO_BUTTON_NOTE = 0x2A; // Solo LED
+const UNDO_BUTTON_CC = 0x6C; // Rec Arm button
+const UNDO_BUTTON_NOTE = 0x2B; // Rec Arm LED
+
 let midiOut;
+let application;
 let effectTrackBank;
 let fx1PerfPage;
 let fx2PerfPage;
 let fx3PerfPage;
 let lastFXTrackBank;
 let lastFXPerfPage;
+let projectFadersPage;
 
 // Chain Selection
 let fxChainSelectors = []; // Array of ChainSelector
@@ -81,7 +88,8 @@ let chainCounts = [0, 0, 0, 0];        // [trackIndex] -> number of chains
 function init() {
     host.getMidiInPort(0).setMidiCallback(onMidi);
     midiOut = host.getMidiOutPort(0);
-    
+    application = host.createApplication();
+
     // Create bank for first 3 effect tracks
     effectTrackBank = host.createEffectTrackBank(3, 3, 0);
 
@@ -89,7 +97,6 @@ function init() {
         const track = effectTrackBank.getItemAt(i);
         track.exists().markInterested();
         track.name().markInterested();
-        track.volume().markInterested();
         
         for (let s = 0; s < 3; s++) {
             track.getSend(s).markInterested();
@@ -119,18 +126,18 @@ function init() {
 
     // Setup 'perf' page for FX Track 1
     const fx1 = effectTrackBank.getItemAt(0);
-    fx1PerfPage = fx1.createCursorRemoteControlsPage("fx1_perf", 4, "perf");
-    for (let i = 0; i < 4; i++) fx1PerfPage.getParameter(i).markInterested();
+    fx1PerfPage = fx1.createCursorRemoteControlsPage("fx1_perf", 5, "perf");
+    for (let i = 0; i < 5; i++) fx1PerfPage.getParameter(i).markInterested();
 
     // Setup 'perf' page for FX Track 2
     const fx2 = effectTrackBank.getItemAt(1);
-    fx2PerfPage = fx2.createCursorRemoteControlsPage("fx2_perf", 4, "perf");
-    for (let i = 0; i < 4; i++) fx2PerfPage.getParameter(i).markInterested();
+    fx2PerfPage = fx2.createCursorRemoteControlsPage("fx2_perf", 5, "perf");
+    for (let i = 0; i < 5; i++) fx2PerfPage.getParameter(i).markInterested();
 
     // Setup 'perf' page for FX Track 3
     const fx3 = effectTrackBank.getItemAt(2);
-    fx3PerfPage = fx3.createCursorRemoteControlsPage("fx3_perf", 4, "perf");
-    for (let i = 0; i < 4; i++) fx3PerfPage.getParameter(i).markInterested();
+    fx3PerfPage = fx3.createCursorRemoteControlsPage("fx3_perf", 5, "perf");
+    for (let i = 0; i < 5; i++) fx3PerfPage.getParameter(i).markInterested();
 
     // Setup for the ABSOLUTE LAST FX track
     // We create a bank of 1 track and scroll it to the end
@@ -169,12 +176,18 @@ function init() {
         chainCounts[3] = count;
     });
 
+    // Project-level macro page tagged 'faders'
+    const rootTrack = host.getProject().getRootTrackGroup();
+    projectFadersPage = rootTrack.createCursorRemoteControlsPage("project_faders", 3, "faders");
+    for (let i = 0; i < 3; i++) projectFadersPage.getParameter(i).markInterested();
+
     host.println("LCXL2-FX - Initialized!");
     host.println("Controlling first 3 Effect Tracks via LCXL2 Channels 6, 7, 8");
-    host.println("Top row knobs 1-4 mapped to FX1 'perf' page");
-    host.println("Middle row knobs 1-4 mapped to FX2 'perf' page");
-    host.println("Bottom row knobs 1-4 mapped to FX3 'perf' page");
+    host.println("Top row knobs 1-5 mapped to FX1 'perf' page");
+    host.println("Middle row knobs 1-5 mapped to FX2 'perf' page");
+    host.println("Bottom row knobs 1-5 mapped to FX3 'perf' page");
     host.println("Faders 1-5 mapped to the LAST FX track's DEVICE 'perf' page");
+    host.println("Faders 6-8 mapped to project-level macro page 'faders'");
     host.println("Bottom buttons control FX Chain selection (Green/Orange/Amber/Red)");
 }
 
@@ -196,8 +209,17 @@ function onMidi(status, data1, data2) {
 function handleCC(cc, value) {
     const val = value / 127.0;
 
+    if (cc === REDO_BUTTON_CC && value > 0) {
+        application.redo();
+        return;
+    }
+
+    if (cc === UNDO_BUTTON_CC && value > 0) {
+        application.undo();
+        return;
+    }
+
     // Check Chain Selection Buttons (Bottom 16)
-    // Only trigger on press (value > 0)
     if (value > 0) {
         for (let i = 0; i < CHAIN_BUTTONS.length; i++) {
             const btn = CHAIN_BUTTONS[i];
@@ -214,24 +236,24 @@ function handleCC(cc, value) {
         }
     }
 
-    // Check 'perf' knobs for FX1 (Top row 1-4)
-    for (let i = 0; i < 4; i++) {
+    // Check 'perf' knobs for FX1 (Top row 1-5)
+    for (let i = 0; i < 5; i++) {
         if (cc === CONTROL.PERF_KNOBS[i]) {
             fx1PerfPage.getParameter(i).set(val);
             return;
         }
     }
 
-    // Check 'perf' knobs for FX2 (Middle row 1-4)
-    for (let i = 0; i < 4; i++) {
+    // Check 'perf' knobs for FX2 (Middle row 1-5)
+    for (let i = 0; i < 5; i++) {
         if (cc === CONTROL.PERF_KNOBS_MID[i]) {
             fx2PerfPage.getParameter(i).set(val);
             return;
         }
     }
 
-    // Check 'perf' knobs for FX3 (Bottom row 1-4)
-    for (let i = 0; i < 4; i++) {
+    // Check 'perf' knobs for FX3 (Bottom row 1-5)
+    for (let i = 0; i < 5; i++) {
         if (cc === CONTROL.PERF_KNOBS_BOT[i]) {
             fx3PerfPage.getParameter(i).set(val);
             return;
@@ -246,10 +268,10 @@ function handleCC(cc, value) {
         }
     }
 
-    // Check last 3 faders (Volume for FX 1-3)
+    // Check last 3 faders (Project macro page 'faders')
     for (let i = 0; i < 3; i++) {
         if (cc === CONTROL.FADERS[i]) {
-            effectTrackBank.getItemAt(i).volume().set(val);
+            projectFadersPage.getParameter(i).set(val);
             return;
         }
     }
@@ -274,6 +296,9 @@ function handleCC(cc, value) {
 }
 
 function flush() {
+    midiOut.sendMidi(0x90 + USER_CHANNEL, REDO_BUTTON_NOTE, 127);
+    midiOut.sendMidi(0x90 + USER_CHANNEL, UNDO_BUTTON_NOTE, 127);
+
     // Update LEDs for Chain Selection
     for (let i = 0; i < CHAIN_BUTTONS.length; i++) {
         const btn = CHAIN_BUTTONS[i];

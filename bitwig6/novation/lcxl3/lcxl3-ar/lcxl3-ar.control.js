@@ -364,9 +364,8 @@ function handleSendEncoder(trackIndex, sendIndex, value) {
         return;
     }
     
-    // Handle as absolute encoder (0-127 -> 0.0-1.0) with faster response curve
     const linear = value / 127.0;
-    const normalizedValue = Math.pow(linear, 0.2);
+    const normalizedValue = Math.pow(linear, 0.15);
     send.set(normalizedValue);
     
     if (DEBUG && Math.random() < 0.1) {
@@ -399,10 +398,8 @@ function handleEncoderColumn(columnIndex, paramIndex, value, channel) {
         return;
     }
     
-    // Handle as absolute encoder (0-127 -> 0.0-1.0) with faster response curve
     const linear = value / 127.0;
-    // Power curve < 1 makes response faster (reaches higher values sooner)
-    const normalizedValue = Math.pow(linear, 0.7);
+    const normalizedValue = Math.pow(linear, 0.5);
     param.set(normalizedValue);
     
     if (DEBUG && Math.random() < 0.1) { // Log 10% of the time to reduce spam
