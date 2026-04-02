@@ -15,9 +15,14 @@ const DEBUG = true;
 const PINNED_TRACK_INDEX = 0; // Track 1 (0-indexed)
 
 // MIDI Channels (0-indexed)
-const CHANNEL_MODE_1 = 0; // Custom Mode 1 -> params 0,1,2
-const CHANNEL_MODE_2 = 1; // Custom Mode 2 -> params 4,5,6
-const CHANNEL_MODE_3 = 2; // Custom Mode 3 -> sends 0,1,2 on child tracks
+const CH_CHILD_START = 0;   // Channels 1-8 -> child tracks 0-7
+const CH_CHILD_END = 7;
+const CH_PRIMARY_1 = 8;     // Channel 9 -> primary params 0,1,2
+const CH_PRIMARY_2 = 9;     // Channel 10 -> primary params 4,5,6
+const CH_SENDS = 10;        // Channel 11 -> sends 0,1,2 on child tracks
+
+const NUM_CHILD_RC_PAGES = 3; // Pages tagged '1', '2', '3'
+const NUM_CHILD_RC_PARAMS = 8; // 8 params per page (one per knob column)
 
 // LCXL3 Custom Mode MIDI CC mappings
 const CC = {
@@ -82,6 +87,10 @@ let armStates = [];             // Array of arm() SettableBooleanValue for each 
 // Sends for Mode 3 (3 sends per child track)
 const NUM_SENDS = 3;
 let childTrackSends = [];       // 2D array: childTrackSends[trackIndex][sendIndex]
+
+// Modes 9-16: remote control pages on child track devices
+// childTrackRCs[trackIndex] = { device, pages: [page1, page2, page3] }
+let childTrackRCs = [];
 
 function init() {
     log("LCXL3-AR - Initializing...");
@@ -177,6 +186,9 @@ function setupChildTracks() {
             childTrackSends[i][s] = send;
         }
         
+        // Remote control pages on the child track's primary device (modes 9-16)
+        setupChildTrackRC(track, i);
+        
         armTracks[i] = track;
         
         const buttonIndex = i;
@@ -188,9 +200,9 @@ function setupChildTracks() {
         mute.addValueObserver(function(isMuted) {
             const cc = CC.BTN_U1 + buttonIndex;
             const ledValue = isMuted ? 0 : 127;
-            midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
-            midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
-            midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
+            for (let ch = 0; ch < 16; ch++) {
+                midiOut.sendMidi(0xB0 + ch, cc, ledValue);
+            }
         });
         
         const arm = track.arm();
@@ -200,13 +212,37 @@ function setupChildTracks() {
         arm.addValueObserver(function(isArmed) {
             const cc = CC.BTN_B1 + buttonIndex;
             const ledValue = isArmed ? 0 : 127;
-            midiOut.sendMidi(0xB0 + CHANNEL_MODE_1, cc, ledValue);
-            midiOut.sendMidi(0xB0 + CHANNEL_MODE_2, cc, ledValue);
-            midiOut.sendMidi(0xB0 + CHANNEL_MODE_3, cc, ledValue);
+            for (let ch = 0; ch < 16; ch++) {
+                midiOut.sendMidi(0xB0 + ch, cc, ledValue);
+            }
         });
     }
     
     log("Child tracks setup complete");
+}
+
+function setupChildTrackRC(track, trackIndex) {
+    const deviceBank = track.createDeviceBank(1);
+    const device = deviceBank.getDevice(0);
+    device.exists().markInterested();
+    device.name().markInterested();
+    
+    const pages = [];
+    for (let p = 0; p < NUM_CHILD_RC_PAGES; p++) {
+        const tag = String(p + 1);
+        const page = device.createCursorRemoteControlsPage(
+            "Child" + trackIndex + "_Page" + tag, NUM_CHILD_RC_PARAMS, tag
+        );
+        for (let j = 0; j < NUM_CHILD_RC_PARAMS; j++) {
+            const param = page.getParameter(j);
+            param.exists().markInterested();
+            param.name().markInterested();
+            param.value().markInterested();
+        }
+        pages[p] = page;
+    }
+    
+    childTrackRCs[trackIndex] = { device: device, pages: pages };
 }
 
 function setupObservers() {
@@ -243,79 +279,72 @@ function onMidi(status, data1, data2) {
 }
 
 function handleCC(channel, cc, value) {
-    // Mode 3 (channel 2): sends 0,1,2 on child tracks
-    if (channel === CHANNEL_MODE_3) {
-        // Encoders Top Row -> Send 0 on child tracks 0-7
+    // 1. Child Track Remote Controls (Channels 1-8 / index 0-7)
+    if (channel >= CH_CHILD_START && channel <= CH_CHILD_END) {
+        const trackIndex = channel - CH_CHILD_START;
         if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
-            const trackIndex = cc - CC.ENC_T1;
-            handleSendEncoder(trackIndex, 0, value);
+            handleChildRCEncoder(trackIndex, 0, cc - CC.ENC_T1, value);
             return;
         }
-        // Encoders Middle Row -> Send 1 on child tracks 0-7
         if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
-            const trackIndex = cc - CC.ENC_M1;
-            handleSendEncoder(trackIndex, 1, value);
+            handleChildRCEncoder(trackIndex, 1, cc - CC.ENC_M1, value);
             return;
         }
-        // Encoders Bottom Row -> Send 2 on child tracks 0-7
         if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
-            const trackIndex = cc - CC.ENC_B1;
-            handleSendEncoder(trackIndex, 2, value);
+            handleChildRCEncoder(trackIndex, 2, cc - CC.ENC_B1, value);
             return;
         }
     }
     
-    // Ignore channels other than Mode 1, 2, 3
-    if (channel !== CHANNEL_MODE_1 && channel !== CHANNEL_MODE_2 && channel !== CHANNEL_MODE_3) {
-        return;
-    }
-    
-    // Encoders for Mode 1 & 2 only (Mode 3 encoders handled above)
-    if (channel === CHANNEL_MODE_1 || channel === CHANNEL_MODE_2) {
-        // Determine parameter offset based on MIDI channel
-        // Mode 1 (channel 0): params 0,1,2
-        // Mode 2 (channel 1): params 4,5,6
-        const paramOffset = (channel === CHANNEL_MODE_1) ? 0 : 4;
-        // Encoders Top Row (CC13-CC20) -> Parameter 0 or 4 on pages 1-8
+    // 2. Primary Device Parameters (Channel 9 & 10 / index 8 & 9)
+    if (channel === CH_PRIMARY_1 || channel === CH_PRIMARY_2) {
+        const paramOffset = (channel === CH_PRIMARY_1) ? 0 : 4;
         if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
-            const columnIndex = cc - CC.ENC_T1; // 0-7
-            handleEncoderColumn(columnIndex, paramOffset + 0, value, channel);
+            handleEncoderColumn(cc - CC.ENC_T1, paramOffset + 0, value, channel);
             return;
         }
-        
-        // Encoders Middle Row (CC21-CC28) -> Parameter 1 or 5 on pages 1-8
         if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
-            const columnIndex = cc - CC.ENC_M1; // 0-7
-            handleEncoderColumn(columnIndex, paramOffset + 1, value, channel);
+            handleEncoderColumn(cc - CC.ENC_M1, paramOffset + 1, value, channel);
             return;
         }
-        
-        // Encoders Bottom Row (CC29-CC36) -> Parameter 2 or 6 on pages 1-8
         if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
-            const columnIndex = cc - CC.ENC_B1; // 0-7
-            handleEncoderColumn(columnIndex, paramOffset + 2, value, channel);
+            handleEncoderColumn(cc - CC.ENC_B1, paramOffset + 2, value, channel);
             return;
         }
     }
     
+    // 3. Sends (Channel 11 / index 10)
+    if (channel === CH_SENDS) {
+        if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
+            handleSendEncoder(cc - CC.ENC_T1, 0, value);
+            return;
+        }
+        if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
+            handleSendEncoder(cc - CC.ENC_M1, 1, value);
+            return;
+        }
+        if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
+            handleSendEncoder(cc - CH_CHILD_START, 2, value);
+            return;
+        }
+    }
+    
+    // 4. Shared Faders and Buttons (All channels)
     // Faders -> 'volumes' page on primary device
     if (cc >= CC.FADER1 && cc <= CC.FADER8) {
-        const faderIndex = cc - CC.FADER1;
-        handleFader(faderIndex, value);
+        handleFader(cc - CC.FADER1, value);
         return;
     }
     
     // Upper Buttons -> Toggle MUTE on child tracks
     if (cc >= CC.BTN_U1 && cc <= CC.BTN_U8) {
-        const buttonIndex = cc - CC.BTN_U1;
-        handleUpperButton(buttonIndex);
+        handleUpperButton(cc - CC.BTN_U1);
         return;
     }
     
-    // Bottom Buttons -> Toggle REC ARM on MIDI group child tracks
+    // Bottom Buttons -> Toggle REC ARM on child tracks
     if (cc >= CC.BTN_B1 && cc <= CC.BTN_B8) {
-        const buttonIndex = cc - CC.BTN_B1;
-        handleBottomButton(buttonIndex);
+        handleBottomButton(cc - CC.BTN_B1);
         return;
     }
 }
@@ -386,7 +415,7 @@ function handleFader(faderIndex, value) {
 }
 
 /**
- * Handle send encoder input for Mode 3
+ * Handle send encoder input
  * @param {number} trackIndex - Child track index 0-7
  * @param {number} sendIndex - Send index 0-2
  * @param {number} value - MIDI CC value (0-127 absolute)
@@ -414,14 +443,54 @@ function handleSendEncoder(trackIndex, sendIndex, value) {
     send.set(normalizedValue);
     
     if (DEBUG && Math.random() < 0.1) {
-        host.println(`[M3] Track ${trackIndex + 1} Send ${sendIndex + 1}: ${send.name().get()} = ${normalizedValue.toFixed(2)}`);
+        host.println(`[SENDS] Track ${trackIndex + 1} Send ${sendIndex + 1}: ${send.name().get()} = ${normalizedValue.toFixed(2)}`);
+    }
+}
+
+/**
+ * Handle encoder input for child track remote controls
+ * @param {number} trackIndex - Child track index 0-7 (derived from MIDI channel)
+ * @param {number} pageIndex - RC page index 0-2 (0=top row, 1=middle, 2=bottom)
+ * @param {number} paramIndex - Parameter index 0-7 (knob column)
+ * @param {number} value - MIDI CC value (0-127 absolute)
+ */
+function handleChildRCEncoder(trackIndex, pageIndex, paramIndex, value) {
+    if (!pinnedTrackIsGroup) {
+        log(`Child RC track ${trackIndex + 1} page ${pageIndex + 1} param ${paramIndex}: ignored (not a group track)`);
+        return;
+    }
+    
+    const rc = childTrackRCs[trackIndex];
+    if (!rc) {
+        log(`Child RC track ${trackIndex + 1}: no RC data`);
+        return;
+    }
+    
+    const page = rc.pages[pageIndex];
+    if (!page) {
+        log(`Child RC track ${trackIndex + 1} page ${pageIndex + 1}: no page`);
+        return;
+    }
+    
+    const param = page.getParameter(paramIndex);
+    if (!param || !param.exists().get()) {
+        log(`Child RC track ${trackIndex + 1} page ${pageIndex + 1} param ${paramIndex}: doesn't exist`);
+        return;
+    }
+    
+    const linear = value / 127.0;
+    const normalizedValue = Math.pow(linear, 0.5);
+    param.set(normalizedValue);
+    
+    if (DEBUG && Math.random() < 0.1) {
+        host.println(`[CH${trackIndex + 1}] Page '${pageIndex + 1}' P${paramIndex}: ${param.name().get()} = ${normalizedValue.toFixed(2)}`);
     }
 }
 
 /**
  * Handle encoder input for a specific column and parameter index
  * @param {number} columnIndex - Column index 0-7 (maps to pages '1'-'8')
- * @param {number} paramIndex - Parameter index 0-5 (Mode 1: 0,1,2 / Mode 2: 3,4,5)
+ * @param {number} paramIndex - Parameter index 0-5
  * @param {number} value - MIDI CC value (0-127 absolute)
  * @param {number} channel - MIDI channel for logging
  */
@@ -449,7 +518,7 @@ function handleEncoderColumn(columnIndex, paramIndex, value, channel) {
     
     if (DEBUG && Math.random() < 0.1) { // Log 10% of the time to reduce spam
         const pageName = String(columnIndex + 1);
-        const modeName = channel === CHANNEL_MODE_1 ? 'M1' : 'M2';
+        const modeName = channel === CH_PRIMARY_1 ? 'P1' : 'P2';
         host.println(`[${modeName}] Encoder col ${columnIndex + 1} -> Page '${pageName}' P${paramIndex}: ${param.name().get()} = ${normalizedValue.toFixed(2)}`);
     }
 }
@@ -491,6 +560,23 @@ function logTrackStatus() {
         log(`  ${paramCount}/8 params mapped`);
     }
     
+    // Log child track RC pages (channels 1-8)
+    log("--- Child Track RC Pages (channels 1-8) ---");
+    for (let t = 0; t < 8; t++) {
+        const rc = childTrackRCs[t];
+        if (!rc || !rc.device.exists().get()) continue;
+        const trackName = childTrackBank.getItemAt(t).name().get();
+        for (let p = 0; p < NUM_CHILD_RC_PAGES; p++) {
+            let paramCount = 0;
+            for (let j = 0; j < NUM_CHILD_RC_PARAMS; j++) {
+                if (rc.pages[p].getParameter(j).exists().get()) paramCount++;
+            }
+            if (paramCount > 0) {
+                log(`  Child ${t + 1} (${trackName}) Page '${p + 1}': ${paramCount}/${NUM_CHILD_RC_PARAMS} params`);
+            }
+        }
+    }
+    
     log("=============================");
 }
 
@@ -505,4 +591,3 @@ function flush() {
 function exit() {
     log("LCXL3-AR - Exiting...");
 }
- 

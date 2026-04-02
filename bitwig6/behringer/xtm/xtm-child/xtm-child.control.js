@@ -46,14 +46,16 @@ const LED_STATE = {
 };
 
 const ENCODER_MODE = {
-    PERF: '1',
-    A: '2',
-    B: '3'
+    PERF: 'e1',
+    A: 'e2',
+    B: 'e3'
 };
 
 let midiIn, midiOut;
 let selectedChildIndex = 0;
 let currentEncoderMode = ENCODER_MODE.PERF;
+
+let activeLayer = 'PERF';
 
 let trackBank;
 let pinnedTrack;
@@ -104,10 +106,12 @@ function setupTracks() {
         device.name().markInterested();
         
         const rcs = {
-            '1': device.createCursorRemoteControlsPage("1", 8, "1"),
-            '2': device.createCursorRemoteControlsPage("2", 8, "2"),
-            '3': device.createCursorRemoteControlsPage("3", 8, "3"),
-            buttons: device.createCursorRemoteControlsPage("Buttons", 8, "buttons"),
+            'e1': device.createCursorRemoteControlsPage("e1", 8, "e1"),
+            'e2': device.createCursorRemoteControlsPage("e2", 8, "e2"),
+            'e3': device.createCursorRemoteControlsPage("e3", 8, "e3"),
+            'b1': device.createCursorRemoteControlsPage("b1", 8, "b1"),
+            'b2': device.createCursorRemoteControlsPage("b2", 8, "b2"),
+            'b3': device.createCursorRemoteControlsPage("b3", 8, "b3"),
             device: device,
             track: track
         };
@@ -145,7 +149,7 @@ function reportDebugStatus() {
     host.println(`Track Exists: ${rcs.track.exists().get()} Name: ${rcs.track.name().get()}`);
     host.println(`Device Exists: ${rcs.device.exists().get()} Name: ${rcs.device.name().get()}`);
     
-    const pages = ['1', '2', '3', 'buttons'];
+    const pages = ['e1', 'e2', 'e3', 'b1', 'b2', 'b3'];
     pages.forEach(p => {
         const page = rcs[p];
         let assignedCount = 0;
@@ -161,7 +165,7 @@ function reportDebugStatus() {
 }
 
 function setupRCObservers(rcs, trackIndex) {
-    const pages = ['1', '2', '3'];
+    const pages = ['e1', 'e2', 'e3'];
     pages.forEach(pageKey => {
         const page = rcs[pageKey];
         for (let j = 0; j < 8; j++) {
@@ -177,19 +181,21 @@ function setupRCObservers(rcs, trackIndex) {
         }
     });
 
-    // Setup observers for 'buttons' page separately for LED feedback
-    const buttonsPage = rcs.buttons;
-    for (let j = 0; j < 8; j++) {
-        const param = buttonsPage.getParameter(j);
-        param.exists().markInterested();
-        param.value().markInterested();
-        param.name().markInterested(); // Added this just in case
-        param.value().addValueObserver((value) => {
-            if (selectedChildIndex === trackIndex) {
-                updateUpperButtonLED(j, value);
-            }
-        });
-    }
+    const buttonPages = ['b1', 'b2', 'b3'];
+    buttonPages.forEach(pageKey => {
+        const page = rcs[pageKey];
+        for (let j = 0; j < 8; j++) {
+            const param = page.getParameter(j);
+            param.exists().markInterested();
+            param.value().markInterested();
+            param.name().markInterested();
+            param.value().addValueObserver((value) => {
+                if (selectedChildIndex === trackIndex && resolveButtonsPage() === pageKey) {
+                    updateUpperButtonLED(j, value);
+                }
+            });
+        }
+    });
 }
 
 function onMidi(status, data1, data2) {
@@ -270,7 +276,10 @@ function handleUpperButton(index) {
     const rcs = childTrackRCs[selectedChildIndex];
     if (!rcs) return;
 
-    const param = rcs.buttons.getParameter(index);
+    const page = rcs[resolveButtonsPage()];
+    if (!page) return;
+
+    const param = page.getParameter(index);
     if (param && param.exists().get()) {
         const currentValue = param.value().get();
         const newValue = currentValue > 0.5 ? 0 : 1;
@@ -278,16 +287,27 @@ function handleUpperButton(index) {
     }
 }
 
+function resolveEncoderMode() {
+    return { PERF: 'e1', A: 'e2', B: 'e3' }[activeLayer];
+}
+
+function resolveButtonsPage() {
+    return { PERF: 'b1', A: 'b2', B: 'b3' }[activeLayer];
+}
+
 function toggleLayer(layer) {
     if (layer === 'A') {
-        currentEncoderMode = (currentEncoderMode === ENCODER_MODE.A) ? ENCODER_MODE.PERF : ENCODER_MODE.A;
+        activeLayer = (activeLayer === 'A') ? 'PERF' : 'A';
     } else if (layer === 'B') {
-        currentEncoderMode = (currentEncoderMode === ENCODER_MODE.B) ? ENCODER_MODE.PERF : ENCODER_MODE.B;
+        activeLayer = (activeLayer === 'B') ? 'PERF' : 'B';
     }
 
-    if (DEBUG) host.println("Encoder Mode: " + currentEncoderMode);
+    currentEncoderMode = resolveEncoderMode();
+
+    if (DEBUG) host.println("Layer: " + activeLayer + " Mode: " + currentEncoderMode);
     
     updateLayerLEDs();
+    updateUpperButtonLEDs();
     updateLEDRings();
 }
 
@@ -321,8 +341,11 @@ function updateUpperButtonLEDs() {
     const rcs = childTrackRCs[selectedChildIndex];
     if (!rcs) return;
 
+    const page = rcs[resolveButtonsPage()];
+    if (!page) return;
+
     for (let i = 0; i < 8; i++) {
-        const param = rcs.buttons.getParameter(i);
+        const param = page.getParameter(i);
         const value = (param && param.exists().get()) ? param.value().get() : 0;
         updateUpperButtonLED(i, value);
     }
@@ -338,8 +361,8 @@ function updateUpperButtonLED(index, value) {
 }
 
 function updateLayerLEDs() {
-    setButtonLED(NOTE.LAYER_A, currentEncoderMode === ENCODER_MODE.A ? LED_STATE.ON : LED_STATE.OFF);
-    setButtonLED(NOTE.LAYER_B, currentEncoderMode === ENCODER_MODE.B ? LED_STATE.ON : LED_STATE.OFF);
+    setButtonLED(NOTE.LAYER_A, activeLayer === 'A' ? LED_STATE.ON : LED_STATE.OFF);
+    setButtonLED(NOTE.LAYER_B, activeLayer === 'B' ? LED_STATE.ON : LED_STATE.OFF);
 }
 
 function initializeLEDRings() {
