@@ -11,10 +11,12 @@ host.defineController(
 host.defineMidiPorts(1, 1);
 host.addDeviceNameBasedDiscoveryPair(["X-TOUCH MINI"], ["X-TOUCH MINI"]);
 
-const INPUT_MIDI_CHANNEL = 0; // Channel 1 (0-based)
-const FADER_MIDI_CHANNEL = 8; // Channel 9 (0-based)
+const INPUT_MIDI_CHANNEL = 0;
+const FADER_MIDI_CHANNEL = 8;
 const OUTPUT_MIDI_CHANNEL = 0;
 const DEBUG = true;
+const MAX_DEPTH = 3;
+const TARGET_TRACK_NAME = "TRACK 1/1";
 
 const CC = {
     ENCODER_1: 16, ENCODER_2: 17, ENCODER_3: 18, ENCODER_4: 19,
@@ -26,21 +28,18 @@ const CC = {
 const NOTE = {
     ENCODER_PUSH_1: 32, ENCODER_PUSH_2: 33, ENCODER_PUSH_3: 34, ENCODER_PUSH_4: 35,
     ENCODER_PUSH_5: 36, ENCODER_PUSH_6: 37, ENCODER_PUSH_7: 38, ENCODER_PUSH_8: 39,
-    
+
     BUTTON_UPPER_1: 89, BUTTON_UPPER_2: 90, BUTTON_UPPER_3: 40, BUTTON_UPPER_4: 41,
     BUTTON_UPPER_5: 42, BUTTON_UPPER_6: 43, BUTTON_UPPER_7: 44, BUTTON_UPPER_8: 45,
-    
+
     BUTTON_LOWER_1: 87, BUTTON_LOWER_2: 88, BUTTON_LOWER_3: 91, BUTTON_LOWER_4: 92,
     BUTTON_LOWER_5: 86, BUTTON_LOWER_6: 93, BUTTON_LOWER_7: 94, BUTTON_LOWER_8: 95,
-    
+
     BUTTON_A: 84,
     BUTTON_B: 85,
 };
 
-const LED_STATE = {
-    OFF: 0,
-    ON: 127
-};
+const LED_STATE = { OFF: 0, ON: 127 };
 
 const UPPER_BUTTON_NOTES = [
     NOTE.BUTTON_UPPER_1, NOTE.BUTTON_UPPER_2, NOTE.BUTTON_UPPER_3, NOTE.BUTTON_UPPER_4,
@@ -53,150 +52,229 @@ const LOWER_BUTTON_NOTES = [
 ];
 
 let midiIn, midiOut;
-let selectedChildIndex = 0; // 0-7, selected via bottom row
-let activeLayer = 'N_PAGE'; // 'N_PAGE', 'PERFORM' (A), 'VOLS' (B)
+let selectedChildIndex = 0;
+let activeLayer = 'N_PAGE';
 
-let targetTrack;
-let primaryDevice;
-
-let pageN = []; // n1-n8 on primary device
-let pageNPerform; // n-perform on primary device
-let pageNVols; // n-vols on primary device
-let pageNMutes; // n-mutes on primary device
-let pageNAllVols; // n-all-vols on primary device
+var candidates = [];
+var parentCandidate = null;
+var activeCandidate = null;
 
 function init() {
     midiIn = host.getMidiInPort(0);
     midiOut = host.getMidiOutPort(0);
-    
     midiIn.setMidiCallback(onMidi);
-    
-    setupTracks();
-    
+
+    setupCandidates();
+
+    host.scheduleTask(function() {
+        resolveActiveCandidate();
+        if (DEBUG) reportDebugStatus();
+    }, 200);
+
     if (DEBUG) {
         host.println("=== X-Touch Mini Nested initialized ===");
-        host.scheduleTask(reportDebugStatus, null, 2000);
     }
 }
 
-function setupTracks() {
-    // First track within the first track
-    const mainTrackBank = host.createTrackBank(1, 0, 0, false);
-    const firstTrack = mainTrackBank.getTrack(0);
-    firstTrack.exists().markInterested();
-    firstTrack.isGroup().markInterested();
-    firstTrack.name().markInterested();
+function setupCandidates() {
+    var tracks = [];
 
-    const nestedTrackBank = firstTrack.createTrackBank(1, 0, 0, false);
-    targetTrack = nestedTrackBank.getTrack(0);
-    targetTrack.exists().markInterested();
-    targetTrack.name().markInterested();
+    var bank0 = host.createTrackBank(1, 0, 0, false);
+    tracks[0] = bank0.getItemAt(0);
 
-    const deviceBank = targetTrack.createDeviceBank(1);
-    primaryDevice = deviceBank.getDevice(0);
-    primaryDevice.exists().markInterested();
-    primaryDevice.name().markInterested();
-
-    // Setup pages on the primary device
-    for (let i = 0; i < 8; i++) {
-        const tagName = "n" + (i + 1);
-        pageN[i] = primaryDevice.createCursorRemoteControlsPage(tagName, 8, tagName);
-        setupPageObservers(pageN[i], 'n' + i);
+    for (var d = 1; d < MAX_DEPTH; d++) {
+        var parent = tracks[d - 1];
+        var childBank = parent.createTrackBank(1, 0, 0, false);
+        tracks[d] = childBank.getItemAt(0);
     }
 
-    pageNPerform = primaryDevice.createCursorRemoteControlsPage("n-perform", 8, "n-perform");
-    setupPageObservers(pageNPerform, 'perform');
+    for (var d = 0; d < MAX_DEPTH; d++) {
+        candidates[d] = createCandidateForTrack(tracks[d], "d" + d);
+    }
 
-    pageNVols = primaryDevice.createCursorRemoteControlsPage("n-vols", 8, "n-vols");
-    setupPageObservers(pageNVols, 'vols');
+    var parentTrack = tracks[0].createParentTrack(0, 0);
+    parentCandidate = createCandidateForTrack(parentTrack, "parent");
 
-    pageNMutes = primaryDevice.createCursorRemoteControlsPage("n-mutes", 8, "n-mutes");
-    setupPageObservers(pageNMutes, 'mutes');
+    for (var d = 0; d < MAX_DEPTH; d++) {
+        observeCandidate(candidates[d]);
+    }
+    observeCandidate(parentCandidate);
+}
 
-    pageNAllVols = primaryDevice.createCursorRemoteControlsPage("n-all-vols", 8, "n-all-vols");
-    setupPageObservers(pageNAllVols, 'all-vols');
+function createCandidateForTrack(track, id) {
+    track.exists().markInterested();
+    track.name().markInterested();
+
+    var devBank = track.createDeviceBank(1);
+    var device = devBank.getDevice(0);
+    device.exists().markInterested();
+    device.name().markInterested();
+
+    var prefix = id + "-";
+    var pageN = [];
+    for (var i = 0; i < 8; i++) {
+        var tag = "n" + (i + 1);
+        pageN[i] = device.createCursorRemoteControlsPage(prefix + tag, 8, tag);
+        setupPageObservers(pageN[i], prefix + "n" + i);
+    }
+
+    var pagePerform = device.createCursorRemoteControlsPage(prefix + "n-perform", 8, "n-perform");
+    setupPageObservers(pagePerform, prefix + "perform");
+
+    var pageVols = device.createCursorRemoteControlsPage(prefix + "n-vols", 8, "n-vols");
+    setupPageObservers(pageVols, prefix + "vols");
+
+    var pageMutes = device.createCursorRemoteControlsPage(prefix + "n-mutes", 8, "n-mutes");
+    setupPageObservers(pageMutes, prefix + "mutes");
+
+    var pageAllVols = device.createCursorRemoteControlsPage(prefix + "n-all-vols", 8, "n-all-vols");
+    setupPageObservers(pageAllVols, prefix + "all-vols");
+
+    return {
+        track: track,
+        device: device,
+        pageN: pageN,
+        pagePerform: pagePerform,
+        pageVols: pageVols,
+        pageMutes: pageMutes,
+        pageAllVols: pageAllVols,
+        id: id,
+        prefix: prefix
+    };
+}
+
+function observeCandidate(c) {
+    c.track.exists().addValueObserver(function () { resolveActiveCandidate(); });
+    c.track.name().addValueObserver(function () { resolveActiveCandidate(); });
+}
+
+function resolveActiveCandidate() {
+    var match = null;
+    for (var d = 0; d < MAX_DEPTH; d++) {
+        var c = candidates[d];
+        if (c.track.exists().get() && c.track.name().get() === TARGET_TRACK_NAME) {
+            match = c;
+            break;
+        }
+    }
+    if (!match && parentCandidate.track.exists().get() &&
+        parentCandidate.track.name().get() === TARGET_TRACK_NAME) {
+        match = parentCandidate;
+    }
+    if (match !== activeCandidate) {
+        activeCandidate = match;
+        if (DEBUG) {
+            var name = activeCandidate ? activeCandidate.track.name().get() : "NONE";
+            var id = activeCandidate ? activeCandidate.id : "NONE";
+            host.println("Active candidate changed to " + id + " (" + name + ")");
+        }
+        updateLEDs();
+    }
 }
 
 function setupPageObservers(page, id) {
-    for (let j = 0; j < 8; j++) {
-        const param = page.getParameter(j);
+    for (var j = 0; j < 8; j++) {
+        var param = page.getParameter(j);
         param.exists().markInterested();
         param.value().markInterested();
         param.name().markInterested();
-        param.value().addValueObserver((value) => {
-            onParamValueChanged(id, j, value);
-        });
+        (function (idx) {
+            param.value().addValueObserver(function (value) {
+                onParamValueChanged(id, idx, value);
+            });
+        })(j);
     }
+}
+
+function active() {
+    return activeCandidate;
 }
 
 function getActivePageId() {
-    if (activeLayer === 'PERFORM') return 'perform';
-    if (activeLayer === 'VOLS') return 'vols';
-    return 'n' + selectedChildIndex;
+    var a = active();
+    if (!a) return null;
+    if (activeLayer === 'PERFORM') return a.prefix + "perform";
+    if (activeLayer === 'VOLS') return a.prefix + "vols";
+    return a.prefix + "n" + selectedChildIndex;
+}
+
+function getActiveEncoderPage() {
+    var a = active();
+    if (!a) return null;
+    if (activeLayer === 'PERFORM') return a.pagePerform;
+    if (activeLayer === 'VOLS') return a.pageVols;
+    return a.pageN[selectedChildIndex];
 }
 
 function onParamValueChanged(id, paramIndex, value) {
-    // Encoders
     if (id === getActivePageId()) {
         updateLEDRing(paramIndex, value);
     }
-    
-    // Top Row Buttons (n-mutes)
-    if (id === 'mutes') {
+    var a = active();
+    if (a && id === a.prefix + "mutes") {
         updateUpperButtonLED(paramIndex, value);
     }
 }
 
 function reportDebugStatus() {
     if (!DEBUG) return;
-    
     host.println("--- Status Report ---");
-    host.println(`Target Track Exists: ${targetTrack.exists().get()} Name: ${targetTrack.name().get()}`);
-    host.println(`Active Layer: ${activeLayer} Selected Child: ${selectedChildIndex + 1}`);
-    host.println(`Active Page ID: ${getActivePageId()}`);
+    for (var d = 0; d < MAX_DEPTH; d++) {
+        var c = candidates[d];
+        host.println(
+            "  " + c.id + ": exists=" + c.track.exists().get() +
+            " name=" + c.track.name().get() +
+            " device=" + c.device.name().get()
+        );
+    }
+    var pc = parentCandidate;
+    host.println(
+        "  " + pc.id + ": exists=" + pc.track.exists().get() +
+        " name=" + pc.track.name().get() +
+        " device=" + pc.device.name().get()
+    );
+    var id = activeCandidate ? activeCandidate.id : "NONE";
+    host.println("Active candidate: " + id);
+    host.println("Active layer: " + activeLayer + " Selected page: " + (selectedChildIndex + 1));
 }
 
 function onMidi(status, data1, data2) {
-    const channel = status & 0x0F;
-    const command = status & 0xF0;
-    
+    var channel = status & 0x0F;
+    var command = status & 0xF0;
+
     if (channel === INPUT_MIDI_CHANNEL) {
         if (command === 0xB0) {
             handleCC(data1, data2);
         } else if (command === 0x90 || command === 0x80) {
-            const isPressed = (command === 0x90) && (data2 > 0);
+            var isPressed = (command === 0x90) && (data2 > 0);
             handleNote(data1, isPressed);
         }
     } else if (channel === FADER_MIDI_CHANNEL && command === 0xE0) {
-        // Pitch Bend (Fader)
-        const value = (data2 << 7) | data1;
+        var value = (data2 << 7) | data1;
         handleFader(value);
     }
 }
 
-function getActiveEncoderPage() {
-    if (activeLayer === 'PERFORM') return pageNPerform;
-    if (activeLayer === 'VOLS') return pageNVols;
-    return pageN[selectedChildIndex];
-}
-
 function handleCC(cc, value) {
     if (cc >= CC.ENCODER_1 && cc <= CC.ENCODER_8) {
-        const index = cc - CC.ENCODER_1;
-        const increment = (value >= 1 && value <= 63) ? 0.05 : -0.05;
-        
-        const page = getActiveEncoderPage();
-        const param = page.getParameter(index);
-        if (param && param.exists().get()) {
-            param.inc(increment);
+        var index = cc - CC.ENCODER_1;
+        var increment = (value >= 1 && value <= 63) ? 0.05 : -0.05;
+        var page = getActiveEncoderPage();
+        if (page) {
+            var param = page.getParameter(index);
+            if (param && param.exists().get()) {
+                param.inc(increment);
+            }
         }
         return;
     }
 }
 
 function handleFader(value) {
-    const normalizedValue = value / 16383;
-    const param = pageNAllVols.getParameter(0);
+    var a = active();
+    if (!a) return;
+    var normalizedValue = value / 16383;
+    var param = a.pageAllVols.getParameter(0);
     if (param && param.exists().get()) {
         param.set(normalizedValue);
     }
@@ -205,8 +283,7 @@ function handleFader(value) {
 function handleNote(note, isPressed) {
     if (!isPressed) return;
 
-    // Bottom Row: Select Child / N-Page
-    const lowerIndex = LOWER_BUTTON_NOTES.indexOf(note);
+    var lowerIndex = LOWER_BUTTON_NOTES.indexOf(note);
     if (lowerIndex !== -1) {
         selectedChildIndex = lowerIndex;
         activeLayer = 'N_PAGE';
@@ -214,69 +291,65 @@ function handleNote(note, isPressed) {
         return;
     }
 
-    // Top Row: n-mutes
-    const upperIndex = UPPER_BUTTON_NOTES.indexOf(note);
+    var upperIndex = UPPER_BUTTON_NOTES.indexOf(note);
     if (upperIndex !== -1) {
-        const param = pageNMutes.getParameter(upperIndex);
-        if (param && param.exists().get()) {
-            const newValue = param.value().get() > 0.5 ? 0 : 1;
-            param.set(newValue);
+        var a = active();
+        if (a) {
+            var param = a.pageMutes.getParameter(upperIndex);
+            if (param && param.exists().get()) {
+                var newValue = param.value().get() > 0.5 ? 0 : 1;
+                param.set(newValue);
+            }
         }
         return;
     }
 
-    // Button A: Toggle Perform
     if (note === NOTE.BUTTON_A) {
-        if (activeLayer === 'PERFORM') {
-            activeLayer = 'N_PAGE';
-        } else {
-            activeLayer = 'PERFORM';
-        }
+        activeLayer = (activeLayer === 'PERFORM') ? 'N_PAGE' : 'PERFORM';
         updateLEDs();
         return;
     }
 
-    // Button B: Toggle Vols
     if (note === NOTE.BUTTON_B) {
-        if (activeLayer === 'VOLS') {
-            activeLayer = 'N_PAGE';
-        } else {
-            activeLayer = 'VOLS';
-        }
+        activeLayer = (activeLayer === 'VOLS') ? 'N_PAGE' : 'VOLS';
         updateLEDs();
         return;
     }
 
-    // Encoder Push: Reset
-    const encoderPushIndex = [
+    var encoderPushIndex = [
         NOTE.ENCODER_PUSH_1, NOTE.ENCODER_PUSH_2, NOTE.ENCODER_PUSH_3, NOTE.ENCODER_PUSH_4,
         NOTE.ENCODER_PUSH_5, NOTE.ENCODER_PUSH_6, NOTE.ENCODER_PUSH_7, NOTE.ENCODER_PUSH_8
     ].indexOf(note);
-    
+
     if (encoderPushIndex !== -1) {
-        const page = getActiveEncoderPage();
-        const param = page.getParameter(encoderPushIndex);
-        if (param && param.exists().get()) {
-            param.reset();
+        var page = getActiveEncoderPage();
+        if (page) {
+            var param = page.getParameter(encoderPushIndex);
+            if (param && param.exists().get()) {
+                param.reset();
+            }
         }
     }
 }
 
 function updateLEDs() {
-    for (let i = 0; i < 8; i++) {
-        const state = (activeLayer === 'N_PAGE' && selectedChildIndex === i) ? LED_STATE.ON : LED_STATE.OFF;
+    for (var i = 0; i < 8; i++) {
+        var state = (activeLayer === 'N_PAGE' && selectedChildIndex === i) ? LED_STATE.ON : LED_STATE.OFF;
         setButtonLED(LOWER_BUTTON_NOTES[i], state);
     }
-    
+
     setButtonLED(NOTE.BUTTON_A, (activeLayer === 'PERFORM') ? LED_STATE.ON : LED_STATE.OFF);
     setButtonLED(NOTE.BUTTON_B, (activeLayer === 'VOLS') ? LED_STATE.ON : LED_STATE.OFF);
-    
-    // Update Encoder Rings for current page
-    const page = getActiveEncoderPage();
-    for (let i = 0; i < 8; i++) {
-        const param = page.getParameter(i);
-        if (param && param.exists().get()) {
-            updateLEDRing(i, param.value().get());
+
+    var page = getActiveEncoderPage();
+    for (var i = 0; i < 8; i++) {
+        if (page) {
+            var param = page.getParameter(i);
+            if (param && param.exists().get()) {
+                updateLEDRing(i, param.value().get());
+            } else {
+                setLEDRingValue(i, 0);
+            }
         } else {
             setLEDRingValue(i, 0);
         }
@@ -284,29 +357,25 @@ function updateLEDs() {
 }
 
 function updateUpperButtonLED(index, value) {
-    const state = (value > 0.5) ? LED_STATE.ON : LED_STATE.OFF;
+    var state = (value > 0.5) ? LED_STATE.ON : LED_STATE.OFF;
     setButtonLED(UPPER_BUTTON_NOTES[index], state);
 }
 
 function updateLEDRing(index, value) {
-    let position = Math.floor(value * 11);
+    var position = Math.floor(value * 11);
     if (position > 11) position = 11;
-    const ledValue = position + 32; // Center-filled mode or similar
-    setLEDRingValue(index, ledValue);
+    setLEDRingValue(index, position + 32);
 }
 
 function setLEDRingValue(index, value) {
-    const cc = CC.LED_RING_1 + index;
-    midiOut.sendMidi(0xB0 + OUTPUT_MIDI_CHANNEL, cc, value);
+    midiOut.sendMidi(0xB0 + OUTPUT_MIDI_CHANNEL, CC.LED_RING_1 + index, value);
 }
 
 function setButtonLED(note, state) {
     midiOut.sendMidi(0x90 + OUTPUT_MIDI_CHANNEL, note, state);
 }
 
-function flush() {
-    // Optional: Refresh any state if needed
-}
+function flush() {}
 
 function exit() {
     if (DEBUG) host.println("X-Touch Mini Nested exited");
