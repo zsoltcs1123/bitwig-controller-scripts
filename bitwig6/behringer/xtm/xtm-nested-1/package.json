@@ -1,0 +1,23 @@
+{
+  "name": "xtm-nested-1",
+  "version": "1.0",
+  "description": "Nested Track Controller 1 for X-Touch Mini",
+  "author": "Zsolt",
+  "manufacturer": "Behringer",
+  "model": "X-Touch Mini Nested 1",
+  "uid": "a1b2c3d4-e5f6-7890-1234-56789abcdef1",
+  "hardware": {
+    "manufacturer": "Behringer",
+    "model": "X-Touch Mini"
+  },
+  "midi": {
+    "ports": [
+      {
+        "name": "X-TOUCH MINI",
+        "discovery": {
+          "name": "X-TOUCH MINI"
+        }
+      }
+    ]
+  }
+}
