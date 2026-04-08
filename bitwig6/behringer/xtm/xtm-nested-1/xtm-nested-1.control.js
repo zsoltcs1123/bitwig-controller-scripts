@@ -17,6 +17,10 @@ const OUTPUT_MIDI_CHANNEL = 0;
 const DEBUG = true;
 const MAX_DEPTH = 3;
 const TARGET_TRACK_NAME = "TRACK 1/1";
+const NUM_CHILDREN = 8;
+const CHILD_PERF_TAG = "c-perf";
+const CHILD_PERF_COUNT = 5;
+const N_PAGE_TAIL_START = 5;
 
 const CC = {
     ENCODER_1: 16, ENCODER_2: 17, ENCODER_3: 18, ENCODER_4: 19,
@@ -130,6 +134,23 @@ function createCandidateForTrack(track, id) {
     var pageAllVols = device.createCursorRemoteControlsPage(prefix + "n-all-vols", 8, "n-all-vols");
     setupPageObservers(pageAllVols, prefix + "all-vols");
 
+    var childBank = track.createTrackBank(NUM_CHILDREN, 0, 0, false);
+    var childPerfPages = [];
+    for (var c = 0; c < NUM_CHILDREN; c++) {
+        var ct = childBank.getItemAt(c);
+        ct.exists().markInterested();
+        ct.name().markInterested();
+        var ctDevBank = ct.createDeviceBank(1);
+        var ctDevice = ctDevBank.getDevice(0);
+        ctDevice.exists().markInterested();
+        ctDevice.name().markInterested();
+        var cpPage = ctDevice.createCursorRemoteControlsPage(
+            prefix + "child" + c + "-cperf", CHILD_PERF_COUNT, CHILD_PERF_TAG
+        );
+        setupPageObservers(cpPage, prefix + "cperf" + c, CHILD_PERF_COUNT);
+        childPerfPages[c] = cpPage;
+    }
+
     return {
         track: track,
         device: device,
@@ -138,6 +159,7 @@ function createCandidateForTrack(track, id) {
         pageVols: pageVols,
         pageMutes: pageMutes,
         pageAllVols: pageAllVols,
+        childPerfPages: childPerfPages,
         id: id,
         prefix: prefix
     };
@@ -172,8 +194,9 @@ function resolveActiveCandidate() {
     }
 }
 
-function setupPageObservers(page, id) {
-    for (var j = 0; j < 8; j++) {
+function setupPageObservers(page, id, count) {
+    if (!count) count = 8;
+    for (var j = 0; j < count; j++) {
         var param = page.getParameter(j);
         param.exists().markInterested();
         param.value().markInterested();
@@ -190,30 +213,30 @@ function active() {
     return activeCandidate;
 }
 
-function getActivePageId() {
+function onParamValueChanged(id, paramIndex, value) {
+    var a = active();
+    if (!a) return;
+    if (id === a.prefix + "mutes") {
+        updateUpperButtonLED(paramIndex, value);
+        return;
+    }
+    for (var i = 0; i < 8; i++) {
+        var resolved = resolveEncoder(i);
+        if (!resolved) continue;
+        var matchId = resolveEncoderPageId(i);
+        if (matchId === id && resolved.paramIndex === paramIndex) {
+            updateLEDRing(i, value);
+        }
+    }
+}
+
+function resolveEncoderPageId(index) {
     var a = active();
     if (!a) return null;
     if (activeLayer === 'PERFORM') return a.prefix + "perform";
     if (activeLayer === 'VOLS') return a.prefix + "vols";
+    if (index < CHILD_PERF_COUNT) return a.prefix + "cperf" + selectedChildIndex;
     return a.prefix + "n" + selectedChildIndex;
-}
-
-function getActiveEncoderPage() {
-    var a = active();
-    if (!a) return null;
-    if (activeLayer === 'PERFORM') return a.pagePerform;
-    if (activeLayer === 'VOLS') return a.pageVols;
-    return a.pageN[selectedChildIndex];
-}
-
-function onParamValueChanged(id, paramIndex, value) {
-    if (id === getActivePageId()) {
-        updateLEDRing(paramIndex, value);
-    }
-    var a = active();
-    if (a && id === a.prefix + "mutes") {
-        updateUpperButtonLED(paramIndex, value);
-    }
 }
 
 function reportDebugStatus() {
@@ -259,15 +282,30 @@ function handleCC(cc, value) {
     if (cc >= CC.ENCODER_1 && cc <= CC.ENCODER_8) {
         var index = cc - CC.ENCODER_1;
         var increment = (value >= 1 && value <= 63) ? 0.05 : -0.05;
-        var page = getActiveEncoderPage();
-        if (page) {
-            var param = page.getParameter(index);
+        var resolved = resolveEncoder(index);
+        if (resolved) {
+            var param = resolved.page.getParameter(resolved.paramIndex);
             if (param && param.exists().get()) {
                 param.inc(increment);
             }
         }
         return;
     }
+}
+
+function resolveEncoder(index) {
+    var a = active();
+    if (!a) return null;
+    if (activeLayer === 'PERFORM') return { page: a.pagePerform, paramIndex: index };
+    if (activeLayer === 'VOLS') return { page: a.pageVols, paramIndex: index };
+    if (index < CHILD_PERF_COUNT) {
+        var cpPage = a.childPerfPages[selectedChildIndex];
+        if (!cpPage) return null;
+        return { page: cpPage, paramIndex: index };
+    }
+    var nPage = a.pageN[selectedChildIndex];
+    if (!nPage) return null;
+    return { page: nPage, paramIndex: index };
 }
 
 function handleFader(value) {
@@ -322,9 +360,9 @@ function handleNote(note, isPressed) {
     ].indexOf(note);
 
     if (encoderPushIndex !== -1) {
-        var page = getActiveEncoderPage();
-        if (page) {
-            var param = page.getParameter(encoderPushIndex);
+        var resolved = resolveEncoder(encoderPushIndex);
+        if (resolved) {
+            var param = resolved.page.getParameter(resolved.paramIndex);
             if (param && param.exists().get()) {
                 param.reset();
             }
@@ -341,10 +379,10 @@ function updateLEDs() {
     setButtonLED(NOTE.BUTTON_A, (activeLayer === 'PERFORM') ? LED_STATE.ON : LED_STATE.OFF);
     setButtonLED(NOTE.BUTTON_B, (activeLayer === 'VOLS') ? LED_STATE.ON : LED_STATE.OFF);
 
-    var page = getActiveEncoderPage();
     for (var i = 0; i < 8; i++) {
-        if (page) {
-            var param = page.getParameter(i);
+        var resolved = resolveEncoder(i);
+        if (resolved) {
+            var param = resolved.page.getParameter(resolved.paramIndex);
             if (param && param.exists().get()) {
                 updateLEDRing(i, param.value().get());
             } else {
