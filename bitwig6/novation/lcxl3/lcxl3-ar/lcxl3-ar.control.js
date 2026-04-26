@@ -420,7 +420,7 @@ function handleSendEncoder(trackIndex, sendIndex, value) {
     if (!sends) return;
     var send = sends[sendIndex];
     if (!send || !send.exists().get()) return;
-    send.set(Math.pow(value / 127.0, 0.15));
+    send.set(value / 127.0);
 }
 
 function handleChildRCEncoder(trackIndex, pageIndex, paramIndex, value) {
@@ -432,7 +432,7 @@ function handleChildRCEncoder(trackIndex, pageIndex, paramIndex, value) {
     if (!page) return;
     var param = page.getParameter(paramIndex);
     if (!param || !param.exists().get()) return;
-    param.set(Math.pow(value / 127.0, 0.5));
+    param.set(value / 127.0);
 }
 
 function handleSubGroupEncoder(pageIndex, columnIndex, value) {
@@ -446,7 +446,7 @@ function handleSubGroupEncoder(pageIndex, columnIndex, value) {
     if (!page) return;
     var param = page.getParameter(paramIdx);
     if (!param || !param.exists().get()) return;
-    param.set(Math.pow(value / 127.0, 0.5));
+    param.set(value / 127.0);
 }
 
 function handleTracksEncoder(pageIndex, paramIndex, value) {
@@ -458,7 +458,7 @@ function handleTracksEncoder(pageIndex, paramIndex, value) {
     if (!param) { log("TracksEnc: no param at page " + pageIndex + " param " + paramIndex); return; }
     if (!param.exists().get()) { log("TracksEnc: param not mapped - page " + pageIndex + " param " + paramIndex + " name=" + param.name().get()); return; }
     log("TracksEnc: setting page " + pageIndex + " param " + paramIndex + " (" + param.name().get() + ") = " + value);
-    param.set(Math.pow(value / 127.0, 0.5));
+    param.set(value / 127.0);
 }
 
 function handleEncoderColumn(columnIndex, paramIndex, value, channel) {
@@ -468,7 +468,7 @@ function handleEncoderColumn(columnIndex, paramIndex, value, channel) {
     if (!page) return;
     var param = page.getParameter(paramIndex);
     if (!param || !param.exists().get()) return;
-    param.set(Math.pow(value / 127.0, 0.5));
+    param.set(value / 127.0);
 }
 
 function logTrackStatus() {
