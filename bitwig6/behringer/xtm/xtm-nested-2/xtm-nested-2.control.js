@@ -13,7 +13,7 @@ host.addDeviceNameBasedDiscoveryPair(["X-TOUCH MINI"], ["X-TOUCH MINI"]);
 
 const INPUT_MIDI_CHANNEL = 0;
 const FADER_MIDI_CHANNEL = 8;
-const OUTPUT_MIDI_CHANNEL = 0;
+const OUTPUT_MIDI_CHANNEL = 0; 
 const DEBUG = true;
 const MAX_DEPTH = 3;
 const SIBLINGS_PER_DEPTH = 8;
@@ -81,7 +81,8 @@ function init() {
 }
 
 function setupCandidates() {
-    var rootBank = host.createTrackBank(SIBLINGS_PER_DEPTH, 0, 0, false);
+    var rootGroup = host.getProject().getRootTrackGroup();
+    var rootBank = rootGroup.createTrackBank(SIBLINGS_PER_DEPTH, 0, 0, false);
     for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
         var t = rootBank.getItemAt(i);
         candidates.push(createCandidateForTrack(t, "d0-" + i));

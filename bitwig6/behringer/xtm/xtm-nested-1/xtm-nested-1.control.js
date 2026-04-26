@@ -16,6 +16,7 @@ const FADER_MIDI_CHANNEL = 8;
 const OUTPUT_MIDI_CHANNEL = 0;
 const DEBUG = true;
 const MAX_DEPTH = 3;
+const SIBLINGS_PER_DEPTH = 8;
 const TARGET_TRACK_NAME = "TRACK 1/1";
 const NUM_CHILDREN = 8;
 const CHILD_PERF_TAG = "c-perf";
@@ -80,26 +81,36 @@ function init() {
 }
 
 function setupCandidates() {
-    var tracks = [];
+    var rootGroup = host.getProject().getRootTrackGroup();
+    var rootBank = rootGroup.createTrackBank(SIBLINGS_PER_DEPTH, 0, 0, false);
+    for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
+        var t = rootBank.getItemAt(i);
+        candidates.push(createCandidateForTrack(t, "d0-" + i));
+    }
 
-    var bank0 = host.createTrackBank(1, 0, 0, false);
-    tracks[0] = bank0.getItemAt(0);
+    var prevLevel = [];
+    for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
+        prevLevel.push(rootBank.getItemAt(i));
+    }
 
     for (var d = 1; d < MAX_DEPTH; d++) {
-        var parent = tracks[d - 1];
-        var childBank = parent.createTrackBank(1, 0, 0, false);
-        tracks[d] = childBank.getItemAt(0);
+        var nextLevel = [];
+        for (var p = 0; p < prevLevel.length; p++) {
+            var childBank = prevLevel[p].createTrackBank(SIBLINGS_PER_DEPTH, 0, 0, false);
+            for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
+                var ct = childBank.getItemAt(i);
+                candidates.push(createCandidateForTrack(ct, "d" + d + "-" + p + "-" + i));
+                nextLevel.push(ct);
+            }
+        }
+        prevLevel = nextLevel;
     }
 
-    for (var d = 0; d < MAX_DEPTH; d++) {
-        candidates[d] = createCandidateForTrack(tracks[d], "d" + d);
-    }
-
-    var parentTrack = tracks[0].createParentTrack(0, 0);
+    var parentTrack = rootBank.getItemAt(0).createParentTrack(0, 0);
     parentCandidate = createCandidateForTrack(parentTrack, "parent");
 
-    for (var d = 0; d < MAX_DEPTH; d++) {
-        observeCandidate(candidates[d]);
+    for (var i = 0; i < candidates.length; i++) {
+        observeCandidate(candidates[i]);
     }
     observeCandidate(parentCandidate);
 }
@@ -164,7 +175,7 @@ function observeCandidate(c) {
 
 function resolveActiveCandidate() {
     var match = null;
-    for (var d = 0; d < MAX_DEPTH; d++) {
+    for (var d = 0; d < candidates.length; d++) {
         var c = candidates[d];
         if (c.track.exists().get() && c.track.name().get() === TARGET_TRACK_NAME) {
             match = c;
@@ -233,8 +244,9 @@ function resolveEncoderPageId(index) {
 function reportDebugStatus() {
     if (!DEBUG) return;
     host.println("--- Status Report ---");
-    for (var d = 0; d < MAX_DEPTH; d++) {
+    for (var d = 0; d < candidates.length; d++) {
         var c = candidates[d];
+        if (!c.track.exists().get()) continue;
         host.println(
             "  " + c.id + ": exists=" + c.track.exists().get() +
             " name=" + c.track.name().get() +

@@ -90,8 +90,9 @@ function init() {
     midiOut = host.getMidiOutPort(0);
     application = host.createApplication();
 
-    // Create bank for first 3 effect tracks
-    effectTrackBank = host.createEffectTrackBank(3, 3, 0);
+    const rootTrackGroup = host.getProject().getRootTrackGroup();
+
+    effectTrackBank = rootTrackGroup.createEffectTrackBank(3, 3, 0);
 
     for (let i = 0; i < 3; i++) {
         const track = effectTrackBank.getItemAt(i);
@@ -141,7 +142,7 @@ function init() {
 
     // Setup for the ABSOLUTE LAST FX track
     // We create a bank of 1 track and scroll it to the end
-    lastFXTrackBank = host.createEffectTrackBank(1, 0, 0);
+    lastFXTrackBank = rootTrackGroup.createEffectTrackBank(1, 0, 0);
     
     // Keep it scrolled to the last track by observing the count
     lastFXTrackBank.channelCount().addValueObserver(function(count) {
@@ -176,9 +177,7 @@ function init() {
         chainCounts[3] = count;
     });
 
-    // Project-level macro page tagged 'faders'
-    const rootTrack = host.getProject().getRootTrackGroup();
-    projectFadersPage = rootTrack.createCursorRemoteControlsPage("project_faders", 3, "faders");
+    projectFadersPage = rootTrackGroup.createCursorRemoteControlsPage("project_faders", 3, "faders");
     for (let i = 0; i < 3; i++) projectFadersPage.getParameter(i).markInterested();
 
     host.println("LCXL2-FX - Initialized!");

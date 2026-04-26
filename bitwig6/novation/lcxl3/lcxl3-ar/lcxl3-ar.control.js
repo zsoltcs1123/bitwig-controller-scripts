@@ -13,7 +13,8 @@ host.defineMidiPorts(1, 1);
 
 var DEBUG = true;
 var TARGET_TRACK_NAME = "TRACKS";
-var MAX_DEPTH = 2;
+var MAX_DEPTH = 1;
+var SIBLINGS_PER_DEPTH = 8;
 
 var CH_CHILD_START = 0;
 var CH_CHILD_END = 7;
@@ -65,24 +66,35 @@ function init() {
 }
 
 function setupCandidates() {
-    var tracks = [];
-    var bank0 = host.createTrackBank(1, 0, 0, false);
-    tracks[0] = bank0.getItemAt(0);
+    var rootGroup = host.getProject().getRootTrackGroup();
+    var rootBank = rootGroup.createTrackBank(SIBLINGS_PER_DEPTH, 0, 0, false);
+    for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
+        candidates.push(createCandidate(rootBank.getItemAt(i), "d0-" + i));
+    }
+
+    var prevLevel = [];
+    for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
+        prevLevel.push(rootBank.getItemAt(i));
+    }
 
     for (var d = 1; d < MAX_DEPTH; d++) {
-        var childBank = tracks[d - 1].createTrackBank(1, 0, 0, false);
-        tracks[d] = childBank.getItemAt(0);
+        var nextLevel = [];
+        for (var p = 0; p < prevLevel.length; p++) {
+            var childBank = prevLevel[p].createTrackBank(SIBLINGS_PER_DEPTH, 0, 0, false);
+            for (var i = 0; i < SIBLINGS_PER_DEPTH; i++) {
+                var ct = childBank.getItemAt(i);
+                candidates.push(createCandidate(ct, "d" + d + "-" + p + "-" + i));
+                nextLevel.push(ct);
+            }
+        }
+        prevLevel = nextLevel;
     }
 
-    for (var d = 0; d < MAX_DEPTH; d++) {
-        candidates[d] = createCandidate(tracks[d], "d" + d);
-    }
-
-    var parentTrack = tracks[0].createParentTrack(0, 0);
+    var parentTrack = rootBank.getItemAt(0).createParentTrack(0, 0);
     parentCandidate = createCandidate(parentTrack, "parent");
 
-    for (var d = 0; d < MAX_DEPTH; d++) {
-        observeCandidate(candidates[d]);
+    for (var i = 0; i < candidates.length; i++) {
+        observeCandidate(candidates[i]);
     }
     observeCandidate(parentCandidate);
 
@@ -243,7 +255,7 @@ function observeCandidate(c) {
 
 function resolveActiveCandidate() {
     var match = null;
-    for (var d = 0; d < MAX_DEPTH; d++) {
+    for (var d = 0; d < candidates.length; d++) {
         var c = candidates[d];
         if (c.track.exists().get() && c.track.name().get() === TARGET_TRACK_NAME) {
             match = c;
@@ -474,8 +486,9 @@ function handleEncoderColumn(columnIndex, paramIndex, value, channel) {
 function logTrackStatus() {
     if (!DEBUG) return;
     log("=== LCXL3-AR Track Status ===");
-    for (var d = 0; d < MAX_DEPTH; d++) {
+    for (var d = 0; d < candidates.length; d++) {
         var c = candidates[d];
+        if (!c.track.exists().get()) continue;
         log("  " + c.id + ": exists=" + c.track.exists().get() +
             " name=" + c.track.name().get() +
             " device=" + c.device.name().get());
