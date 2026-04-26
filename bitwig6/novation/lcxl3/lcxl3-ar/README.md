@@ -26,11 +26,11 @@ The target track name, number of sub-groups, and tracks per sub-group are config
 
 ### Channels 1-8: Child Track Remote Controls
 
-Each MIDI channel maps to one child track (flattened across sub-groups as shown above). The 3 encoder rows map to 3 tagged remote control pages (`c1`, `c2`, `c3`) on each child track's primary device.
+Each MIDI channel maps to one child track (flattened across sub-groups as shown above). Encoders map to 8 tagged remote control pages (`c1` through `c8`) on each child track's primary device — each encoder column maps to a separate page.
 
-- **Top encoder row**: Page tagged `c1`, parameters 0-7
-- **Middle encoder row**: Page tagged `c2`, parameters 0-7
-- **Bottom encoder row**: Page tagged `c3`, parameters 0-7
+- **Top encoder row**: Parameter 0 of each page
+- **Middle encoder row**: Parameter 1 of each page
+- **Bottom encoder row**: Parameter 2 of each page
 
 ### Channel 9: Primary Device Parameters (Group 1)
 

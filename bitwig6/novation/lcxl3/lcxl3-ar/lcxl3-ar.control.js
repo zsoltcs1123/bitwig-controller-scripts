@@ -28,8 +28,8 @@ var TRACKS_PAGE_TAG = "tracks-";
 var NUM_SUB_GROUP_PAGES = 3;
 var NUM_SUB_GROUP_PARAMS = 4;
 var SUB_GROUP_PAGE_TAG = "track-";
-var NUM_CHILD_RC_PAGES = 3;
-var NUM_CHILD_RC_PARAMS = 8;
+var NUM_CHILD_RC_PAGES = 8;
+var NUM_CHILD_RC_PARAMS = 3;
 var NUM_SUB_GROUPS = 2;
 var TRACKS_PER_SUB_GROUP = 4;
 var NUM_CHILDREN = NUM_SUB_GROUPS * TRACKS_PER_SUB_GROUP;
@@ -296,15 +296,15 @@ function handleCC(channel, cc, value) {
     if (channel >= CH_CHILD_START && channel <= CH_CHILD_END) {
         var trackIndex = channel - CH_CHILD_START;
         if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
-            handleChildRCEncoder(trackIndex, 0, cc - CC.ENC_T1, value);
+            handleChildRCEncoder(trackIndex, cc - CC.ENC_T1, 0, value);
             return;
         }
         if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
-            handleChildRCEncoder(trackIndex, 1, cc - CC.ENC_M1, value);
+            handleChildRCEncoder(trackIndex, cc - CC.ENC_M1, 1, value);
             return;
         }
         if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
-            handleChildRCEncoder(trackIndex, 2, cc - CC.ENC_B1, value);
+            handleChildRCEncoder(trackIndex, cc - CC.ENC_B1, 2, value);
             return;
         }
     }

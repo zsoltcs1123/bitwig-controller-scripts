@@ -8,19 +8,14 @@ The script auto-detects the target track by name (`TRACK 1/1`), searching up to 
 
 ## Features
 
-### Encoder Mapping (Mixed Mode)
+### Encoder Mapping
 
-The target track has 8 child tracks. When a bottom row button selects a child (1-8), the encoders are split:
-
-- **Encoders 1-5**: Map to the selected child's primary device, page tagged `c-perf` (params 0-4).
-- **Encoders 6-7-8**: Map to the target track's primary device, page tagged `nX` (params 5-6-7), where X is the selected child number.
-
-This gives you per-child performance controls alongside the parent page's remaining parameters.
+The target track has 8 child tracks. When a bottom row button selects a child (1-8), all 8 encoders map to the selected child's primary device, page tagged `c-perf` (params 0-7).
 
 - **Bottom Row Buttons 1-8**: Select child 1-8.
-- **Button A**: Activates the perform layer — all 8 encoders map to the page tagged `n-perform`.
-- **Button B**: Activates the volumes layer — all 8 encoders map to the page tagged `n-vols`.
-- Selection is mutually exclusive. Pressing a bottom row button while in Layer A or B exits back to mixed mode.
+- **Button A**: Activates the perform layer — all 8 encoders map to the target track's primary device, page tagged `n-perform`.
+- **Button B**: Activates the volumes layer — all 8 encoders map to the target track's primary device, page tagged `n-vols`.
+- Selection is mutually exclusive. Pressing a bottom row button while in Layer A or B exits back to per-child mode.
 - **Encoder Push**: Resets the parameter to its default value.
 
 ### Button Mapping

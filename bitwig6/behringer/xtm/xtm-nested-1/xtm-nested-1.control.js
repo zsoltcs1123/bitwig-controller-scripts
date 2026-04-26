@@ -19,8 +19,7 @@ const MAX_DEPTH = 3;
 const TARGET_TRACK_NAME = "TRACK 1/1";
 const NUM_CHILDREN = 8;
 const CHILD_PERF_TAG = "c-perf";
-const CHILD_PERF_COUNT = 5;
-const N_PAGE_TAIL_START = 5;
+const CHILD_PERF_COUNT = 8;
 
 const CC = {
     ENCODER_1: 16, ENCODER_2: 17, ENCODER_3: 18, ENCODER_4: 19,
@@ -115,12 +114,6 @@ function createCandidateForTrack(track, id) {
     device.name().markInterested();
 
     var prefix = id + "-";
-    var pageN = [];
-    for (var i = 0; i < 8; i++) {
-        var tag = "n" + (i + 1);
-        pageN[i] = device.createCursorRemoteControlsPage(prefix + tag, 8, tag);
-        setupPageObservers(pageN[i], prefix + "n" + i);
-    }
 
     var pagePerform = device.createCursorRemoteControlsPage(prefix + "n-perform", 8, "n-perform");
     setupPageObservers(pagePerform, prefix + "perform");
@@ -154,7 +147,6 @@ function createCandidateForTrack(track, id) {
     return {
         track: track,
         device: device,
-        pageN: pageN,
         pagePerform: pagePerform,
         pageVols: pageVols,
         pageMutes: pageMutes,
@@ -235,8 +227,7 @@ function resolveEncoderPageId(index) {
     if (!a) return null;
     if (activeLayer === 'PERFORM') return a.prefix + "perform";
     if (activeLayer === 'VOLS') return a.prefix + "vols";
-    if (index < CHILD_PERF_COUNT) return a.prefix + "cperf" + selectedChildIndex;
-    return a.prefix + "n" + selectedChildIndex;
+    return a.prefix + "cperf" + selectedChildIndex;
 }
 
 function reportDebugStatus() {
@@ -298,14 +289,9 @@ function resolveEncoder(index) {
     if (!a) return null;
     if (activeLayer === 'PERFORM') return { page: a.pagePerform, paramIndex: index };
     if (activeLayer === 'VOLS') return { page: a.pageVols, paramIndex: index };
-    if (index < CHILD_PERF_COUNT) {
-        var cpPage = a.childPerfPages[selectedChildIndex];
-        if (!cpPage) return null;
-        return { page: cpPage, paramIndex: index };
-    }
-    var nPage = a.pageN[selectedChildIndex];
-    if (!nPage) return null;
-    return { page: nPage, paramIndex: index };
+    var cpPage = a.childPerfPages[selectedChildIndex];
+    if (!cpPage) return null;
+    return { page: cpPage, paramIndex: index };
 }
 
 function handleFader(value) {
