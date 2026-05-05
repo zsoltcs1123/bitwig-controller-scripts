@@ -92,7 +92,7 @@ function init() {
 
     const rootTrackGroup = host.getProject().getRootTrackGroup();
 
-    effectTrackBank = rootTrackGroup.createEffectTrackBank(3, 3, 0);
+    effectTrackBank = rootTrackGroup.createEffectTrackBank(3, 3, 0, false);
 
     for (let i = 0; i < 3; i++) {
         const track = effectTrackBank.getItemAt(i);
