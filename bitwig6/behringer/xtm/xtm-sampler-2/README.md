@@ -1,4 +1,4 @@
-# X-Touch Mini Sampler Controller Script
+# X-Touch Mini Sampler 2 Controller Script
 
 For the Behringer X-Touch Mini in **MC Mode**. Targets a single track's primary device, switchable between two tracks (A/B), and exposes a set of tagged remote control pages.
 
@@ -6,8 +6,8 @@ For the Behringer X-Touch Mini in **MC Mode**. Targets a single track's primary 
 
 Two target track names are configured at the top of the script:
 
-- **A**: `Track 1/1`
-- **B**: `Track 2/1`
+- **A**: `Track 2/4`
+- **B**: `Track 1/4`
 
 The script auto-detects each by name using a flat list of all project tracks (any nesting depth), regardless of drill-down state.
 
@@ -27,8 +27,8 @@ Encoder LED rings reflect the current parameter values.
 
 ## A/B Target
 
-- **Button A**: switch encoder/button/fader focus to target A (`Track 1/1`).
-- **Button B**: switch focus to target B (`Track 2/1`).
+- **Button A**: switch encoder/button/fader focus to target A (`Track 2/4`).
+- **Button B**: switch focus to target B (`Track 1/4`).
 - A and B are mutually exclusive; the active target's LED is lit.
 
 ## Button Mapping
