@@ -8,12 +8,12 @@ It is designed to work with a specific "Group Track" workflow, allowing you to p
 
 For this script to function correctly, your project must be set up as follows:
 
-1.  **Group Track**: Create a Group Track and ensure it is the **first track** in your project (Track 1).
+1.  **Group Track**: Create a Group Track named **`TRACK 1/2`** (nested path name as shown in Bitwig). The script finds it anywhere in the project hierarchy (case-insensitive).
 2.  **Child Tracks**: Place up to 8 instrument/audio tracks *inside* this Group Track.
 3.  **Instrument Selector**: Ideally, each child track should have an **Instrument Selector** (or any device with chains) as its primary device.
 4.  **Remote Controls (Group Track)**:
-    *   Create a Remote Control Page on the Group Track and tag it **`perform`**. Map 8 parameters to it (controlled by **Knobs**).
-    *   Create another Remote Control Page on the Group Track and tag it **`vols`**. Map 8 parameters to it (controlled by **Faders**).
+    *   Create a Remote Control Page on the Group Track and tag it **`nano-perf`**. Map 8 parameters to it (controlled by **Knobs**).
+    *   Create another Remote Control Page on the Group Track and tag it **`nano-vols`**. Map 8 parameters to it (controlled by **Faders**).
 
 ## Controller Usage
 
@@ -51,12 +51,18 @@ The Transport section (Rewind, FF, Stop, Play, Rec) changes function based on th
 *   *Note: These launch scenes within the Group Track scope.*
 
 ### 4. Parameter Control
-*   **Knobs 1-8**: Control parameters on the Group Track's **`perform`** page.
-*   **Faders 1-8**: Control parameters on the Group Track's **`vols`** page.
+*   **Knobs 1-8**: Control parameters on the Group Track's **`nano-perf`** page.
+*   **Faders 1-8**: Control parameters on the Group Track's **`nano-vols`** page.
 
 ## Configuration
 
-You can customize the bank size by editing the script file (`nano-launch.control.js`):
+Target group track name (edit `nano-launch.control.js`):
+
+```javascript
+const TARGET_GROUP_TRACK = "TRACK 1/2";
+```
+
+Bank size:
 
 ```javascript
 const BANK_SIZE = 6; // Set to 3 or 6

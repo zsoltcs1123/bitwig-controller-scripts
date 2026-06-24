@@ -16,6 +16,10 @@ const FADER_MIDI_CHANNEL = 8;
 const OUTPUT_MIDI_CHANNEL = 0;
 const DEBUG = true;
 const FLAT_BANK_SIZE = 256;
+const BANK_SIZE = 3;
+const MAX_CHAINS = 8;
+const NUM_CLIPS = BANK_SIZE * 8;
+const LONG_PRESS_DELAY = 500;
 
 const TARGET_TRACK_A = "Track 1/1";
 const TARGET_TRACK_B = "Track 2/3";
@@ -74,6 +78,8 @@ let midiIn, midiOut;
 // special: -2 = xtm-vols, -3 = xtm-pans (selected via encoder push 2/3).
 let selectedPageIndex = -1;
 let activeTarget = 'A';
+let bottomMode = 'page';
+let clipButtonStates = {};
 
 var detectBank = null;
 var controlA = null;
@@ -90,8 +96,8 @@ function init() {
     midiOut = host.getMidiOutPort(0);
     midiIn.setMidiCallback(onMidi);
 
-    cursorTrackA = host.createCursorTrack(CURSOR_ID + "-A", CURSOR_NAME + " A", 0, 0, false);
-    cursorTrackB = host.createCursorTrack(CURSOR_ID + "-B", CURSOR_NAME + " B", 0, 0, false);
+    cursorTrackA = host.createCursorTrack(CURSOR_ID + "-A", CURSOR_NAME + " A", 0, NUM_CLIPS, false);
+    cursorTrackB = host.createCursorTrack(CURSOR_ID + "-B", CURSOR_NAME + " B", 0, NUM_CLIPS, false);
     controlA = createControl(cursorTrackA, "A");
     controlB = createControl(cursorTrackB, "B");
     cursorTrackA.isPinned().markInterested();
@@ -103,6 +109,10 @@ function init() {
         cursorTrackA.isPinned().set(true);
         cursorTrackB.isPinned().set(true);
         resolveActiveCandidates();
+        var a = active();
+        if (a && a.layerBank && a.chainSelector.exists().get()) {
+            applyChainVolumes(a.layerBank, getActiveChainIndex(a));
+        }
         if (DEBUG) reportDebugStatus();
         updateLEDs();
     }, 200);
@@ -130,6 +140,43 @@ function createControl(cursorTrack, idPrefix) {
     device.exists().markInterested();
     device.name().markInterested();
 
+    var chainSelector = device.createChainSelector();
+    chainSelector.exists().markInterested();
+    chainSelector.activeChainIndex().markInterested();
+    chainSelector.activeChainIndex().addValueObserver(function (index) {
+        var ctrl = controlByPrefix(idPrefix);
+        if (active() === ctrl) {
+            updateLowerButtonLEDs();
+        }
+        if (ctrl && ctrl.layerBank) {
+            applyChainVolumes(ctrl.layerBank, index);
+        }
+    });
+
+    var layerBank = setupLayerBank(device);
+
+    var clipSlots = [];
+    var clipLauncher = cursorTrack.clipLauncherSlotBank();
+    if (clipLauncher) {
+        for (var c = 0; c < NUM_CLIPS; c++) {
+            var clip = clipLauncher.getItemAt(c);
+            clip.exists().markInterested();
+            clip.isPlaying().markInterested();
+            clipSlots.push(clip);
+            (function (clipIndex) {
+                clip.isPlaying().addValueObserver(function (isPlaying) {
+                    var ctrl = controlByPrefix(idPrefix);
+                    if (active() !== ctrl) return;
+                    if (bottomMode !== 'clip') return;
+                    var chainIndex = getActiveChainIndex(ctrl);
+                    if (Math.floor(clipIndex / BANK_SIZE) !== chainIndex) return;
+                    var buttonIndex = clipIndex % BANK_SIZE;
+                    setButtonLED(LOWER_BUTTON_NOTES[buttonIndex], isPlaying ? LED_STATE.ON : LED_STATE.OFF);
+                });
+            })(c);
+        }
+    }
+
     var prefix = idPrefix + "-";
 
     var pagePerf = device.createCursorRemoteControlsPage(prefix + PERF_TAG, 8, PERF_TAG);
@@ -156,15 +203,62 @@ function createControl(cursorTrack, idPrefix) {
     }
 
     return {
+        cursorTrack: cursorTrack,
         device: device,
+        chainSelector: chainSelector,
+        layerBank: layerBank,
+        clipSlots: clipSlots,
         pagePerf: pagePerf,
         pageVols: pageVols,
         pagePans: pagePans,
         pageMutes: pageMutes,
         pageAllVols: pageAllVols,
         numberedPages: numberedPages,
-        prefix: prefix
+        prefix: prefix,
+        idPrefix: idPrefix
     };
+}
+
+function controlByPrefix(idPrefix) {
+    if (idPrefix === 'A') return controlA;
+    if (idPrefix === 'B') return controlB;
+    return null;
+}
+
+function getActiveChainIndex(ctrl) {
+    if (!ctrl || !ctrl.chainSelector.exists().get()) return 0;
+    return ctrl.chainSelector.activeChainIndex().get();
+}
+
+function getClipIndexForButton(ctrl, buttonIndex) {
+    return getActiveChainIndex(ctrl) * BANK_SIZE + buttonIndex;
+}
+
+function setupLayerBank(device) {
+    var bank = device.createLayerBank(MAX_CHAINS);
+    for (var i = 0; i < MAX_CHAINS; i++) {
+        var layer = bank.getItemAt(i);
+        layer.exists().markInterested();
+        var vol = layer.volume();
+        vol.markInterested();
+        vol.exists().markInterested();
+    }
+    return bank;
+}
+
+function applyChainVolumes(layerBank, activeChainIndex) {
+    if (!layerBank) return;
+    for (var i = 0; i < MAX_CHAINS; i++) {
+        var layer = layerBank.getItemAt(i);
+        if (!layer.exists().get()) continue;
+        var vol = layer.volume();
+        if (!vol.exists().get()) continue;
+        if (i === activeChainIndex) {
+            vol.reset();
+        } else {
+            vol.setImmediately(0);
+        }
+    }
 }
 
 function findTrackIndex(targetName) {
@@ -310,13 +404,19 @@ function selectPage(idx) {
 }
 
 function handleNote(note, isPressed) {
-    if (!isPressed) return;
-
     var lowerIndex = LOWER_BUTTON_NOTES.indexOf(note);
     if (lowerIndex !== -1) {
-        selectPage(lowerIndex);
+        if (bottomMode === 'page' && isPressed) {
+            selectPage(lowerIndex);
+        } else if (bottomMode === 'clip') {
+            handleClipButton(lowerIndex, isPressed);
+        } else if (bottomMode === 'chain' && isPressed) {
+            handleChainButton(lowerIndex);
+        }
         return;
     }
+
+    if (!isPressed) return;
 
     var upperIndex = UPPER_BUTTON_NOTES.indexOf(note);
     if (upperIndex !== -1) {
@@ -332,13 +432,13 @@ function handleNote(note, isPressed) {
     }
 
     if (note === NOTE.BUTTON_A) {
-        activeTarget = 'A';
+        bottomMode = (bottomMode === 'clip') ? 'page' : 'clip';
         updateLEDs();
         return;
     }
 
     if (note === NOTE.BUTTON_B) {
-        activeTarget = 'B';
+        bottomMode = (bottomMode === 'chain') ? 'page' : 'chain';
         updateLEDs();
         return;
     }
@@ -353,17 +453,101 @@ function handleNote(note, isPressed) {
     } else if (encoderPushIndex === 2) {
         selectedPageIndex = (selectedPageIndex === -3) ? -1 : -3;
         updateLEDs();
+    } else if (encoderPushIndex === 6) {
+        activeTarget = 'A';
+        if (foundA && controlA.layerBank && controlA.chainSelector.exists().get()) {
+            applyChainVolumes(controlA.layerBank, getActiveChainIndex(controlA));
+        }
+        updateLEDs();
+    } else if (encoderPushIndex === 7) {
+        activeTarget = 'B';
+        if (foundB && controlB.layerBank && controlB.chainSelector.exists().get()) {
+            applyChainVolumes(controlB.layerBank, getActiveChainIndex(controlB));
+        }
+        updateLEDs();
+    }
+}
+
+function handleChainButton(chainIndex) {
+    var a = active();
+    if (!a || !a.chainSelector.exists().get()) return;
+    a.chainSelector.activeChainIndex().set(chainIndex);
+}
+
+function handleClipButton(buttonIndex, isPressed) {
+    if (buttonIndex >= BANK_SIZE) return;
+    var a = active();
+    if (!a) return;
+    var clipIndex = getClipIndexForButton(a, buttonIndex);
+    if (clipIndex < 0 || clipIndex >= NUM_CLIPS) return;
+    var clip = a.clipSlots[clipIndex];
+    if (!clip) return;
+    var note = LOWER_BUTTON_NOTES[buttonIndex];
+
+    if (isPressed) {
+        if (!clip.exists().get()) return;
+        if (clip.isPlaying().get()) {
+            clipButtonStates[note] = { released: false, handled: false };
+            host.scheduleTask(function () {
+                checkClipLongPress(note, buttonIndex);
+            }, LONG_PRESS_DELAY);
+        } else {
+            clip.launch();
+        }
+    } else if (clipButtonStates[note]) {
+        clipButtonStates[note].released = true;
+        if (!clipButtonStates[note].handled && clip.exists().get()) {
+            clip.launch();
+        }
+        delete clipButtonStates[note];
+    }
+}
+
+function checkClipLongPress(note, buttonIndex) {
+    if (!clipButtonStates[note] || clipButtonStates[note].released) return;
+    var a = active();
+    if (!a) return;
+    var clipIndex = getClipIndexForButton(a, buttonIndex);
+    var clip = a.clipSlots[clipIndex];
+    if (clip && clip.exists().get()) {
+        a.cursorTrack.stop();
+    }
+    clipButtonStates[note].handled = true;
+}
+
+function updateLowerButtonLEDs() {
+    if (bottomMode === 'page') {
+        for (var i = 0; i < 8; i++) {
+            setButtonLED(LOWER_BUTTON_NOTES[i], (selectedPageIndex === i) ? LED_STATE.ON : LED_STATE.OFF);
+        }
+        return;
+    }
+    if (bottomMode === 'chain') {
+        var a = active();
+        var activeChain = a ? getActiveChainIndex(a) : -1;
+        for (var j = 0; j < 8; j++) {
+            setButtonLED(LOWER_BUTTON_NOTES[j], (j === activeChain) ? LED_STATE.ON : LED_STATE.OFF);
+        }
+        return;
+    }
+    var ctrl = active();
+    var chainIndex = ctrl ? getActiveChainIndex(ctrl) : 0;
+    for (var k = 0; k < 8; k++) {
+        if (k >= BANK_SIZE) {
+            setButtonLED(LOWER_BUTTON_NOTES[k], LED_STATE.OFF);
+            continue;
+        }
+        var clip = ctrl ? ctrl.clipSlots[chainIndex * BANK_SIZE + k] : null;
+        var playing = clip && clip.exists().get() && clip.isPlaying().get();
+        setButtonLED(LOWER_BUTTON_NOTES[k], playing ? LED_STATE.ON : LED_STATE.OFF);
     }
 }
 
 function updateLEDs() {
-    for (var i = 0; i < 8; i++) {
-        var state = (selectedPageIndex === i) ? LED_STATE.ON : LED_STATE.OFF;
-        setButtonLED(LOWER_BUTTON_NOTES[i], state);
-    }
+    updateLowerButtonLEDs();
 
-    setButtonLED(NOTE.BUTTON_A, (activeTarget === 'A') ? LED_STATE.ON : LED_STATE.OFF);
-    setButtonLED(NOTE.BUTTON_B, (activeTarget === 'B') ? LED_STATE.ON : LED_STATE.OFF);
+    setButtonLED(NOTE.BUTTON_A, (bottomMode === 'clip') ? LED_STATE.ON : LED_STATE.OFF);
+    setButtonLED(NOTE.BUTTON_B, (bottomMode === 'chain') ? LED_STATE.ON : LED_STATE.OFF);
 
     var page = currentEncoderPage();
     for (var i = 0; i < 8; i++) {

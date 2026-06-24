@@ -33,14 +33,20 @@ const CC_MARKER_NEXT = 62;
 const CC_KNOBS = [16, 17, 18, 19, 20, 21, 22, 23];
 const CC_FADERS = [0, 1, 2, 3, 4, 5, 6, 7];
 
-const PINNED_TRACK_INDEX = 0;
+const TARGET_GROUP_TRACK = "TRACK 1/2";
+const FLAT_BANK_SIZE = 256;
+const CURSOR_ID = "nano-launch-group";
+const CURSOR_NAME = "nano-launch";
+
 const NUM_TRACKS = 8;
 const BANK_SIZE = 3; // Can be 3 or 6
-const NUM_CLIPS = 5 * BANK_SIZE; 
+const NUM_CLIPS = 5 * BANK_SIZE;
 
 let midiIn, midiOut;
-let trackBank;
-let pinnedTrack;
+let detectBank = null;
+let cursorGroupTrack = null;
+let foundGroup = false;
+let selectedGroupIndex = -1;
 let groupTrackRemoteControls;
 let groupTrackVolControls;
 let childTrackBank;
@@ -65,42 +71,88 @@ function init() {
     midiOut = host.getMidiOutPort(0);
     midiIn.setMidiCallback(onMidi);
 
-    // Create a track bank to pin to the first track.
-    // We need to see 8 tracks for the children, and 6 scenes for the clips (2 pages).
-    trackBank = host.createTrackBank(NUM_TRACKS, 0, NUM_CLIPS, false);
-    pinnedTrack = trackBank.getItemAt(PINNED_TRACK_INDEX);
-    pinnedTrack.exists().markInterested();
-    pinnedTrack.isGroup().markInterested();
+    setupDetection();
 
-    // Group Track Remote Controls (Performance Page)
-    groupTrackRemoteControls = pinnedTrack.createCursorRemoteControlsPage("perform", 8, "perform");
+    cursorGroupTrack = host.createCursorTrack(CURSOR_ID, CURSOR_NAME, 0, 0, false);
+    cursorGroupTrack.isPinned().markInterested();
+    setupGroupControls(cursorGroupTrack);
+    setupChildTracks(cursorGroupTrack);
+
+    host.scheduleTask(function () {
+        cursorGroupTrack.isPinned().set(true);
+        resolveGroupTrack();
+        turnOffAllLeds();
+        updateTransportLeds();
+    }, 200);
+
+    host.println("nano-launch: Initialized (target group: " + TARGET_GROUP_TRACK + ").");
+}
+
+function setupDetection() {
+    var rootGroup = host.getProject().getRootTrackGroup();
+    detectBank = rootGroup.createTrackBank(FLAT_BANK_SIZE, 0, 0, true);
+    for (var i = 0; i < FLAT_BANK_SIZE; i++) {
+        var t = detectBank.getItemAt(i);
+        t.exists().markInterested();
+        t.name().markInterested();
+        t.exists().addValueObserver(function () { resolveGroupTrack(); });
+        t.name().addValueObserver(function () { resolveGroupTrack(); });
+    }
+}
+
+function findTrackIndex(targetName) {
+    for (var i = 0; i < FLAT_BANK_SIZE; i++) {
+        var t = detectBank.getItemAt(i);
+        if (t.exists().get() && t.name().get().toLowerCase() === targetName.toLowerCase()) return i;
+    }
+    return -1;
+}
+
+function resolveGroupTrack() {
+    var idx = findTrackIndex(TARGET_GROUP_TRACK);
+
+    if (idx !== selectedGroupIndex) {
+        selectedGroupIndex = idx;
+        if (idx !== -1) {
+            cursorGroupTrack.selectChannel(detectBank.getItemAt(idx));
+        }
+    }
+
+    var newFound = idx !== -1;
+    if (newFound !== foundGroup) {
+        foundGroup = newFound;
+        if (DEBUG) {
+            host.println("Group track '" + TARGET_GROUP_TRACK + "': " + (foundGroup ? ("index " + idx) : "NOT FOUND"));
+        }
+    }
+}
+
+function setupGroupControls(groupTrack) {
+    groupTrackRemoteControls = groupTrack.createCursorRemoteControlsPage("nano-perf", 8, "nano-perf");
     for (let i = 0; i < 8; i++) {
         groupTrackRemoteControls.getParameter(i).markInterested();
         groupTrackRemoteControls.getParameter(i).setIndication(true);
     }
 
-    // Group Track Remote Controls (Volume Page)
-    groupTrackVolControls = pinnedTrack.createCursorRemoteControlsPage("vols", 8, "vols");
+    groupTrackVolControls = groupTrack.createCursorRemoteControlsPage("nano-vols", 8, "nano-vols");
     for (let i = 0; i < 8; i++) {
         groupTrackVolControls.getParameter(i).markInterested();
         groupTrackVolControls.getParameter(i).setIndication(true);
     }
 
-    // Group Track Chain Selector (Primary Device)
-    const groupDevice = pinnedTrack.createDeviceBank(1).getDevice(0);
+    const groupDevice = groupTrack.createDeviceBank(1).getDevice(0);
     groupTrackChainSelector = groupDevice.createChainSelector();
     groupTrackChainSelector.exists().markInterested();
     groupTrackChainSelector.activeChainIndex().markInterested();
-    
-    // Add observer for Transport LED feedback (Instrument Mode)
     groupTrackChainSelector.activeChainIndex().addValueObserver((index) => {
         if (isInstrumentSwitchMode) {
             updateTransportLeds();
         }
     });
+}
 
-    // Create a bank for the child tracks of the pinned group track
-    childTrackBank = pinnedTrack.createTrackBank(NUM_TRACKS, 0, NUM_CLIPS, false);
+function setupChildTracks(groupTrack) {
+    childTrackBank = groupTrack.createTrackBank(NUM_TRACKS, 0, NUM_CLIPS, false);
     
     // Get Scene Bank from Child Track Bank
     sceneBank = childTrackBank.sceneBank();
@@ -131,14 +183,14 @@ function init() {
         const childDevice = track.createDeviceBank(1).getDevice(0);
         const chainSelector = childDevice.createChainSelector();
         chainSelector.exists().markInterested();
+        chainSelector.activeChainIndex().markInterested();
+        chainSelector.activeChainIndex().addValueObserver((index) => {
+            if (isInstrumentSwitchMode) {
+                updateTransportLeds(index);
+            }
+        });
         childTrackChainSelectors[i] = chainSelector;
     }
-
-    // Turn off all LEDs on init
-    turnOffAllLeds();
-    updateTransportLeds(); // Initialize Bank LEDs
-
-    host.println("nano-launch: Initialized with 8x3 clip launcher grid (5 Banks).");
 }
 
 const LONG_PRESS_DELAY = 500; // ms
@@ -210,6 +262,7 @@ function onMidi(status, data1, data2) {
             if (transIndex !== -1) {
                 if (isInstrumentSwitchMode) {
                     setChainOnAllTracks(transIndex);
+                    updateTransportLeds(transIndex);
                 } else {
                     currentBank = transIndex;
                     updateTransportLeds();
@@ -272,6 +325,19 @@ function setChainOnAllTracks(chainIndex) {
             selector.activeChainIndex().set(chainIndex);
         }
     }
+}
+
+function getActiveChainIndex() {
+    if (groupTrackChainSelector && groupTrackChainSelector.exists().get()) {
+        return groupTrackChainSelector.activeChainIndex().get();
+    }
+    for (let i = 0; i < NUM_TRACKS; i++) {
+        const selector = childTrackChainSelectors[i];
+        if (selector && selector.exists().get()) {
+            return selector.activeChainIndex().get();
+        }
+    }
+    return -1;
 }
 
 function getClipInfoFromCC(cc) {
@@ -426,29 +492,16 @@ function updateCycleLed() {
 }
 
 function updateModeLeds() {
-    // 1. Update Mode Toggle LED (PREV_TRACK)
     midiOut.sendMidi(0xB0, CC_PREV_TRACK, isInstrumentSwitchMode ? 127 : 0);
-
-    // 2. Refresh Transport LEDs based on current state and mode
-    if (groupTrackChainSelector.exists().get()) {
-        updateTransportLeds(groupTrackChainSelector.activeChainIndex().get());
-    } else {
-        updateTransportLeds(-1);
-    }
+    updateTransportLeds();
 }
 
 function updateTransportLeds(activeIndex) {
     let targetIndex = -1;
 
     if (isInstrumentSwitchMode) {
-        // Show active Instrument Chain
-        if (typeof activeIndex !== 'undefined') {
-            targetIndex = activeIndex;
-        } else if (groupTrackChainSelector.exists().get()) {
-            targetIndex = groupTrackChainSelector.activeChainIndex().get();
-        }
+        targetIndex = (activeIndex >= 0) ? activeIndex : getActiveChainIndex();
     } else {
-        // Show active MIDI Bank
         targetIndex = currentBank;
     }
 
