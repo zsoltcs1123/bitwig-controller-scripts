@@ -127,18 +127,30 @@ function resolveGroupTrack() {
     }
 }
 
+function autoSelectPageWhenAvailable(page) {
+    page.selectedPageIndex().markInterested();
+    page.pageCount().markInterested();
+    page.pageCount().addValueObserver((count) => {
+        if (count > 0 && page.selectedPageIndex().get() < 0) {
+            page.selectedPageIndex().set(0);
+        }
+    });
+}
+
 function setupGroupControls(groupTrack) {
     groupTrackRemoteControls = groupTrack.createCursorRemoteControlsPage("nano-perf", 8, "nano-perf");
     for (let i = 0; i < 8; i++) {
         groupTrackRemoteControls.getParameter(i).markInterested();
         groupTrackRemoteControls.getParameter(i).setIndication(true);
     }
+    autoSelectPageWhenAvailable(groupTrackRemoteControls);
 
     groupTrackVolControls = groupTrack.createCursorRemoteControlsPage("nano-vols", 8, "nano-vols");
     for (let i = 0; i < 8; i++) {
         groupTrackVolControls.getParameter(i).markInterested();
         groupTrackVolControls.getParameter(i).setIndication(true);
     }
+    autoSelectPageWhenAvailable(groupTrackVolControls);
 
     const groupDevice = groupTrack.createDeviceBank(1).getDevice(0);
     groupTrackChainSelector = groupDevice.createChainSelector();

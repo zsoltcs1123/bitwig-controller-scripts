@@ -339,6 +339,17 @@ function markPageParams(page, count) {
         param.name().markInterested();
         param.value().markInterested();
     }
+    autoSelectPageWhenAvailable(page);
+}
+
+function autoSelectPageWhenAvailable(page) {
+    page.selectedPageIndex().markInterested();
+    page.pageCount().markInterested();
+    page.pageCount().addValueObserver(function(count) {
+        if (count > 0 && page.selectedPageIndex().get() < 0) {
+            page.selectedPageIndex().set(0);
+        }
+    });
 }
 
 function observeCandidate(c) {
