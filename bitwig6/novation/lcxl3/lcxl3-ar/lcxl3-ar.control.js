@@ -21,8 +21,8 @@ var CH_CHILD_END = 7;
 var CH_PRIMARY_1 = 8;
 var CH_PRIMARY_2 = 9;
 var CH_SENDS = 10;
-var CH_SUB_GROUPS = 11;
-var CH_TRACKS = 12;
+var CH_MODE12 = 11;
+var CH_MODE13 = 12;
 
 var NUM_TRACKS_PAGES = 3;
 var TRACKS_PAGE_TAG = "tracks-";
@@ -35,6 +35,16 @@ var NUM_SUB_GROUPS = 2;
 var TRACKS_PER_SUB_GROUP = 4;
 var NUM_CHILDREN = NUM_SUB_GROUPS * TRACKS_PER_SUB_GROUP;
 var NUM_SENDS = 3;
+
+var MODE12_TARGET_TRACK = "TRACK 1/2";
+var FLAT_BANK_SIZE = 256;
+var MODE12_RC_PARAMS = 7;
+var MODE12_PARAM_OFFSET = 4;
+var MODE13_NUM_CHILDREN = 8;
+var MODE13_NUM_PAGES = 3;
+var MODE13_PAGE_TAG_PREFIX = "c-perf-";
+var MODE13_PARAM_OFFSET = 0;
+var MODE13_PARAMS_PER_PAGE = 3;
 
 var CC = {
     ENC_T1: 13, ENC_T2: 14, ENC_T3: 15, ENC_T4: 16,
@@ -55,6 +65,14 @@ var midiIn, midiOut;
 var candidates = [];
 var parentCandidate = null;
 var activeCandidate = null;
+var mode12DetectBank = null;
+var cursorMode12Track = null;
+var mode12Pages = [];
+var mode12Device = null;
+var mode12Found = false;
+var mode12SelectedIndex = -1;
+var mode13ChildBank = null;
+var mode13ChildPages = [];
 
 function init() {
     log("LCXL3-AR - Initializing...");
@@ -62,7 +80,82 @@ function init() {
     midiOut = host.getMidiOutPort(0);
     midiIn.setMidiCallback(onMidi);
     setupCandidates();
+    setupMode12();
     log("LCXL3-AR - Initialized!");
+}
+
+function setupMode12() {
+    var rootGroup = host.getProject().getRootTrackGroup();
+    mode12DetectBank = rootGroup.createTrackBank(FLAT_BANK_SIZE, 0, 0, true);
+    for (var i = 0; i < FLAT_BANK_SIZE; i++) {
+        var t = mode12DetectBank.getItemAt(i);
+        t.exists().markInterested();
+        t.name().markInterested();
+        t.exists().addValueObserver(function() { resolveMode12Track(); });
+        t.name().addValueObserver(function() { resolveMode12Track(); });
+    }
+
+    cursorMode12Track = host.createCursorTrack("lcxl3-mode12", "LCXL3 Mode12", 0, 0, false);
+    cursorMode12Track.isPinned().markInterested();
+
+    var devBank = cursorMode12Track.createDeviceBank(1);
+    mode12Device = devBank.getDevice(0);
+    mode12Device.exists().markInterested();
+    mode12Device.name().markInterested();
+
+    for (var p = 0; p < 8; p++) {
+        var tag = "c" + (p + 1);
+        var page = mode12Device.createCursorRemoteControlsPage("mode12-" + tag, MODE12_RC_PARAMS, tag);
+        markPageParams(page, MODE12_RC_PARAMS);
+        mode12Pages[p] = page;
+    }
+
+    mode13ChildBank = cursorMode12Track.createTrackBank(MODE13_NUM_CHILDREN, 0, 0, false);
+    for (var c = 0; c < MODE13_NUM_CHILDREN; c++) {
+        var child = mode13ChildBank.getItemAt(c);
+        child.exists().markInterested();
+        child.name().markInterested();
+        var childDev = child.createDeviceBank(1).getDevice(0);
+        childDev.exists().markInterested();
+        childDev.name().markInterested();
+        mode13ChildPages[c] = [];
+        for (var pg = 0; pg < MODE13_NUM_PAGES; pg++) {
+            var tag = MODE13_PAGE_TAG_PREFIX + (pg + 1);
+            var perfPage = childDev.createCursorRemoteControlsPage(
+                "mode13-child" + c + "-" + tag, MODE12_RC_PARAMS, tag
+            );
+            markPageParams(perfPage, MODE12_RC_PARAMS);
+            mode13ChildPages[c][pg] = perfPage;
+        }
+    }
+
+    host.scheduleTask(function() {
+        cursorMode12Track.isPinned().set(true);
+        resolveMode12Track();
+    }, 200);
+}
+
+function findMode12TrackIndex(targetName) {
+    for (var i = 0; i < FLAT_BANK_SIZE; i++) {
+        var t = mode12DetectBank.getItemAt(i);
+        if (t.exists().get() && t.name().get().toLowerCase() === targetName.toLowerCase()) return i;
+    }
+    return -1;
+}
+
+function resolveMode12Track() {
+    var idx = findMode12TrackIndex(MODE12_TARGET_TRACK);
+    if (idx !== mode12SelectedIndex) {
+        mode12SelectedIndex = idx;
+        if (idx !== -1) {
+            cursorMode12Track.selectChannel(mode12DetectBank.getItemAt(idx));
+        }
+    }
+    var newFound = idx !== -1;
+    if (newFound !== mode12Found) {
+        mode12Found = newFound;
+        log("Mode 12 track '" + MODE12_TARGET_TRACK + "': " + (mode12Found ? ("index " + idx) : "NOT FOUND"));
+    }
 }
 
 function setupCandidates() {
@@ -352,33 +445,32 @@ function handleCC(channel, cc, value) {
         }
     }
 
-    if (channel === CH_SUB_GROUPS) {
+    if (channel === CH_MODE12) {
         if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
-            handleSubGroupEncoder(0, cc - CC.ENC_T1, value);
+            handleMode12Encoder(cc - CC.ENC_T1, 0, value);
             return;
         }
         if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
-            handleSubGroupEncoder(1, cc - CC.ENC_M1, value);
+            handleMode12Encoder(cc - CC.ENC_M1, 1, value);
             return;
         }
         if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
-            handleSubGroupEncoder(2, cc - CC.ENC_B1, value);
+            handleMode12Encoder(cc - CC.ENC_B1, 2, value);
             return;
         }
     }
 
-    if (channel === CH_TRACKS) {
-        log("CH_TRACKS hit: cc=" + cc + " value=" + value);
+    if (channel === CH_MODE13) {
         if (cc >= CC.ENC_T1 && cc <= CC.ENC_T8) {
-            handleTracksEncoder(0, cc - CC.ENC_T1, value);
+            handleMode13Encoder(cc - CC.ENC_T1, 0, value);
             return;
         }
         if (cc >= CC.ENC_M1 && cc <= CC.ENC_M8) {
-            handleTracksEncoder(1, cc - CC.ENC_M1, value);
+            handleMode13Encoder(cc - CC.ENC_M1, 1, value);
             return;
         }
         if (cc >= CC.ENC_B1 && cc <= CC.ENC_B8) {
-            handleTracksEncoder(2, cc - CC.ENC_B1, value);
+            handleMode13Encoder(cc - CC.ENC_B1, 2, value);
             return;
         }
     }
@@ -447,29 +539,23 @@ function handleChildRCEncoder(trackIndex, pageIndex, paramIndex, value) {
     param.set(value / 127.0);
 }
 
-function handleSubGroupEncoder(pageIndex, columnIndex, value) {
-    var a = active();
-    if (!a) return;
-    var groupIdx = columnIndex < TRACKS_PER_SUB_GROUP ? 0 : 1;
-    var paramIdx = columnIndex - groupIdx * TRACKS_PER_SUB_GROUP;
-    var pages = a.subGroupPages[groupIdx];
-    if (!pages) return;
-    var page = pages[pageIndex];
+function handleMode12Encoder(columnIndex, rowIndex, value) {
+    if (!mode12Found) return;
+    var page = mode12Pages[columnIndex];
     if (!page) return;
-    var param = page.getParameter(paramIdx);
+    var param = page.getParameter(MODE12_PARAM_OFFSET + rowIndex);
     if (!param || !param.exists().get()) return;
     param.set(value / 127.0);
 }
 
-function handleTracksEncoder(pageIndex, paramIndex, value) {
-    var a = active();
-    if (!a) { log("TracksEnc: no active candidate"); return; }
-    var page = a.tracksPages[pageIndex];
-    if (!page) { log("TracksEnc: no page at index " + pageIndex); return; }
-    var param = page.getParameter(paramIndex);
-    if (!param) { log("TracksEnc: no param at page " + pageIndex + " param " + paramIndex); return; }
-    if (!param.exists().get()) { log("TracksEnc: param not mapped - page " + pageIndex + " param " + paramIndex + " name=" + param.name().get()); return; }
-    log("TracksEnc: setting page " + pageIndex + " param " + paramIndex + " (" + param.name().get() + ") = " + value);
+function handleMode13Encoder(columnIndex, rowIndex, value) {
+    if (!mode12Found) return;
+    var pages = mode13ChildPages[columnIndex];
+    if (!pages) return;
+    var page = pages[0];
+    if (!page) return;
+    var param = page.getParameter(MODE13_PARAM_OFFSET + rowIndex);
+    if (!param || !param.exists().get()) return;
     param.set(value / 127.0);
 }
 
@@ -523,6 +609,30 @@ function logTrackStatus() {
             if (a.volumesPage.getParameter(p).exists().get()) vCount++;
         }
         log("  " + vCount + "/8 params mapped");
+        log("--- Mode 12 (" + MODE12_TARGET_TRACK + ") ---");
+        log("  found=" + mode12Found + " device=" + (mode12Found && mode12Device.exists().get() ? mode12Device.name().get() : "n/a"));
+        for (var m = 0; m < 8; m++) {
+            var mCount = 0;
+            for (var mp = MODE12_PARAM_OFFSET; mp < MODE12_PARAM_OFFSET + 3; mp++) {
+                if (mode12Pages[m].getParameter(mp).exists().get()) mCount++;
+            }
+            if (mCount > 0) log("  Page 'c" + (m + 1) + "': " + mCount + "/3 slots (4-6)");
+        }
+        log("--- Mode 13 (children of " + MODE12_TARGET_TRACK + ", " + MODE13_PAGE_TAG_PREFIX + "1) ---");
+        for (var c = 0; c < MODE13_NUM_CHILDREN; c++) {
+            var child = mode13ChildBank.getItemAt(c);
+            if (!child.exists().get()) continue;
+            var page = mode13ChildPages[c][0];
+            if (!page) continue;
+            var pCount = 0;
+            for (var cp = MODE13_PARAM_OFFSET; cp < MODE13_PARAM_OFFSET + MODE13_PARAMS_PER_PAGE; cp++) {
+                if (page.getParameter(cp).exists().get()) pCount++;
+            }
+            if (pCount > 0) {
+                log("  Child " + (c + 1) + " (" + child.name().get() + "): " + pCount + "/3 params on " +
+                    MODE13_PAGE_TAG_PREFIX + "1");
+            }
+        }
         log("--- Child Tracks ---");
         for (var t = 0; t < NUM_CHILDREN; t++) {
             var ct = a.childTracks[t];

@@ -6,4 +6,3 @@ Faders: CC5 - CC12
 
 Upper buttons: CC37 - CC44
 Bottom Buttons: CC45 - CC52
-

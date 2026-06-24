@@ -56,26 +56,24 @@ Encoders control sends 1-3 on each child track (columns 1-8 correspond to child 
 - **Middle encoder row**: Send 2
 - **Bottom encoder row**: Send 3
 
-### Channel 12: Sub-Group Remote Controls (Split)
+### Channel 12: TRACK 1/2 Remote Controls
 
-The controller is split vertically in half. Each half controls one sub-group track's remote control pages (on the track itself, not a device).
+Finds track **`TRACK 1/2`** anywhere in the project (case-insensitive nested path). Each encoder column maps to remote page **`c1`**–**`c8`** on that track's primary device.
 
-- **Left half (columns 1-4)**: TRACK 1 — pages tagged `track-1-1`, `track-1-2`, `track-1-3` (4 params each)
-- **Right half (columns 5-8)**: TRACK 2 — pages tagged `track-2-1`, `track-2-2`, `track-2-3` (4 params each)
+- **Top encoder row**: Parameter 4 of each page (`c1`–`c8`)
+- **Middle encoder row**: Parameter 5 of each page
+- **Bottom encoder row**: Parameter 6 of each page
 
-Encoder rows map to pages:
+### Channel 13: TRACK 1/2 Child Remote Controls
 
-- **Top encoder row**: Page 1 (`track-X-1`)
-- **Middle encoder row**: Page 2 (`track-X-2`)
-- **Bottom encoder row**: Page 3 (`track-X-3`)
+Children of **`TRACK 1/2`** (up to 8). Each encoder column maps to one child track's primary device.
 
-### Channel 13: TRACKS Group Remote Controls
+Three paged remote control pages per child: **`c-perf-1`**, **`c-perf-2`**, **`c-perf-3`** (params 1–3 on each page = 9 params total).
 
-Encoders map to remote control pages on the TRACKS group track itself (not a device). Three pages tagged `tracks-1`, `tracks-2`, `tracks-3`, with 8 parameters each.
+- **Column 1–8**: Child tracks 1–8 inside `TRACK 1/2`
+- **Top / middle / bottom encoder rows**: remote control slots **1 / 2 / 3** on **`c-perf-1`**
 
-- **Top encoder row**: Page `tracks-1`, parameters 0-7
-- **Middle encoder row**: Page `tracks-2`, parameters 0-7
-- **Bottom encoder row**: Page `tracks-3`, parameters 0-7
+`c-perf-2` and `c-perf-3` are set up per child but not reachable from the LCXL3 in Custom Mode (hardware page buttons send no MIDI).
 
 ### Faders (All Channels)
 
