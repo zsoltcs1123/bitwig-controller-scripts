@@ -1,11 +1,11 @@
 {
-  "name": "xtm-nested-1",
+  "name": "xtm-sampler-4",
   "version": "1.0",
-  "description": "Nested Track Controller 1 for X-Touch Mini",
+  "description": "Sampler Track Controller for X-Touch Mini (2/3 & 1/3)",
   "author": "Zsolt",
   "manufacturer": "Behringer",
-  "model": "X-Touch Mini Nested 1",
-  "uid": "a1b2c3d4-e5f6-7890-1234-56789abcdef1",
+  "model": "X-Touch Mini Sampler 4",
+  "uid": "e5f6a7b8-c9d0-1234-5678-9abcdef00005",
   "hardware": {
     "manufacturer": "Behringer",
     "model": "X-Touch Mini"

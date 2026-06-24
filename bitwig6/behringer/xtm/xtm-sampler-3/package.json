@@ -1,11 +1,11 @@
 {
-  "name": "xtm-sampler",
+  "name": "xtm-sampler-3",
   "version": "1.0",
-  "description": "Sampler Track Controller for X-Touch Mini",
+  "description": "Sampler Track Controller for X-Touch Mini (1/2 & 2/3)",
   "author": "Zsolt",
   "manufacturer": "Behringer",
-  "model": "X-Touch Mini Sampler",
-  "uid": "b2c3d4e5-f6a7-8901-2345-6789abcdef02",
+  "model": "X-Touch Mini Sampler 3",
+  "uid": "d4e5f6a7-b8c9-0123-4567-89abcdef0004",
   "hardware": {
     "manufacturer": "Behringer",
     "model": "X-Touch Mini"

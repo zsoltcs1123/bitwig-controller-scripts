@@ -3,9 +3,9 @@ host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Behringer",
-    "X-Touch Mini Sampler",
+    "X-Touch Mini Sampler 3",
     "1.0",
-    "b2c3d4e5-f6a7-8901-2345-6789abcdef02",
+    "d4e5f6a7-b8c9-0123-4567-89abcdef0004",
     "Zsolt"
 );
 host.defineMidiPorts(1, 1);
@@ -14,11 +14,14 @@ host.addDeviceNameBasedDiscoveryPair(["X-TOUCH MINI"], ["X-TOUCH MINI"]);
 const INPUT_MIDI_CHANNEL = 0;
 const FADER_MIDI_CHANNEL = 8;
 const OUTPUT_MIDI_CHANNEL = 0;
-const DEBUG = false;
+const DEBUG = true;
 const FLAT_BANK_SIZE = 256;
 
-const TARGET_TRACK_A = "Track 1/1";
-const TARGET_TRACK_B = "Track 2/1";
+const TARGET_TRACK_A = "Track 1/2";
+const TARGET_TRACK_B = "Track 2/3";
+
+const CURSOR_ID = "xtm3";
+const CURSOR_NAME = "XTM3";
 
 const PAGE_TAGS = ["xtm-1", "xtm-2", "xtm-3", "xtm-4", "xtm-5", "xtm-6", "xtm-7", "xtm-8"];
 const PERF_TAG = "xtm-perf";
@@ -87,8 +90,8 @@ function init() {
     midiOut = host.getMidiOutPort(0);
     midiIn.setMidiCallback(onMidi);
 
-    cursorTrackA = host.createCursorTrack("xtm-A", "XTM A", 0, 0, false);
-    cursorTrackB = host.createCursorTrack("xtm-B", "XTM B", 0, 0, false);
+    cursorTrackA = host.createCursorTrack(CURSOR_ID + "-A", CURSOR_NAME + " A", 0, 0, false);
+    cursorTrackB = host.createCursorTrack(CURSOR_ID + "-B", CURSOR_NAME + " B", 0, 0, false);
     controlA = createControl(cursorTrackA, "A");
     controlB = createControl(cursorTrackB, "B");
     cursorTrackA.isPinned().markInterested();
@@ -105,7 +108,7 @@ function init() {
     }, 200);
 
     if (DEBUG) {
-        host.println("=== X-Touch Mini Sampler initialized ===");
+        host.println("=== " + CURSOR_NAME + " Sampler initialized ===");
     }
 }
 
@@ -413,5 +416,5 @@ function setButtonLED(note, state) {
 function flush() {}
 
 function exit() {
-    if (DEBUG) host.println("X-Touch Mini Sampler exited");
+    if (DEBUG) host.println(CURSOR_NAME + " Sampler exited");
 }

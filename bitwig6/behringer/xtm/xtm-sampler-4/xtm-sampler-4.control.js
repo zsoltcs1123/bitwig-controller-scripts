@@ -3,9 +3,9 @@ host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Behringer",
-    "X-Touch Mini Sampler 2",
+    "X-Touch Mini Sampler 4",
     "1.0",
-    "c3d4e5f6-a7b8-9012-3456-789abcdef003",
+    "e5f6a7b8-c9d0-1234-5678-9abcdef00005",
     "Zsolt"
 );
 host.defineMidiPorts(1, 1);
@@ -17,11 +17,11 @@ const OUTPUT_MIDI_CHANNEL = 0;
 const DEBUG = true;
 const FLAT_BANK_SIZE = 256;
 
-const TARGET_TRACK_A = "Track 2/4";
-const TARGET_TRACK_B = "Track 1/4";
+const TARGET_TRACK_A = "Track 2/3";
+const TARGET_TRACK_B = "Track 1/3";
 
-const CURSOR_ID = "xtm2";
-const CURSOR_NAME = "XTM2";
+const CURSOR_ID = "xtm4";
+const CURSOR_NAME = "XTM4";
 
 const PAGE_TAGS = ["xtm-1", "xtm-2", "xtm-3", "xtm-4", "xtm-5", "xtm-6", "xtm-7", "xtm-8"];
 const PERF_TAG = "xtm-perf";
@@ -257,16 +257,6 @@ function reportDebugStatus() {
     host.println("Target: " + activeTarget + " Page index: " + selectedPageIndex);
     host.println("Active A: " + (foundA ? ("index " + selectedIndexA) : "NONE"));
     host.println("Active B: " + (foundB ? ("index " + selectedIndexB) : "NONE"));
-    debugControl("A", controlA);
-    debugControl("B", controlB);
-}
-
-function debugControl(label, c) {
-    var devExists = c.device.exists().get();
-    var devName = devExists ? c.device.name().get() : "(no device)";
-    var p0 = c.pagePerf.getParameter(0);
-    host.println("  " + label + " device: [" + devName + "] exists=" + devExists +
-        " perf.p0 exists=" + p0.exists().get() + " name=[" + (p0.exists().get() ? p0.name().get() : "") + "]");
 }
 
 function onMidi(status, data1, data2) {
