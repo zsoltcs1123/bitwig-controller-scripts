@@ -14,6 +14,7 @@ For this script to function correctly, your project must be set up as follows:
 4.  **Remote Controls (Group Track)**:
     *   Create a Remote Control Page on the Group Track and tag it **`nano-perf`**. Map 8 parameters to it (controlled by **Knobs**).
     *   Create another Remote Control Page on the Group Track and tag it **`nano-vols`**. Map 8 parameters to it (controlled by **Faders**).
+    *   These pages are picked up **live** — create or tag them mid-set and the script binds immediately, no restart needed.
 
 ## Controller Usage
 

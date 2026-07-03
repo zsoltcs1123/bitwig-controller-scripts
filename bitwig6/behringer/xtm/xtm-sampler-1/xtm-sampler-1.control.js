@@ -31,6 +31,7 @@ const PAGE_TAGS = ["xtm-1", "xtm-2", "xtm-3", "xtm-4", "xtm-5", "xtm-6", "xtm-7"
 const PERF_TAG = "xtm-perf";
 const VOLS_TAG = "xtm-vols";
 const PANS_TAG = "xtm-pans";
+const EQ_TAG = "xtm-eq";
 const MUTES_TAG = "xtm-mutes";
 const ALL_VOLS_TAG = "xtm-all-vols";
 
@@ -75,7 +76,7 @@ const ENCODER_PUSH_NOTES = [
 let midiIn, midiOut;
 
 // selectedPageIndex: -1 means default (xtm-perf). 0..7 means xtm-1..xtm-8.
-// special: -2 = xtm-vols, -3 = xtm-pans (selected via encoder push 2/3).
+// special: -2 = xtm-vols, -3 = xtm-pans, -4 = xtm-eq (selected via encoder push 2/3/4).
 let selectedPageIndex = -1;
 let activeTarget = 'A';
 let bottomMode = 'page';
@@ -188,6 +189,9 @@ function createControl(cursorTrack, idPrefix) {
     var pagePans = device.createCursorRemoteControlsPage(prefix + PANS_TAG, 8, PANS_TAG);
     setupPageObservers(pagePans, prefix + PANS_TAG);
 
+    var pageEq = device.createCursorRemoteControlsPage(prefix + EQ_TAG, 8, EQ_TAG);
+    setupPageObservers(pageEq, prefix + EQ_TAG);
+
     var pageMutes = device.createCursorRemoteControlsPage(prefix + MUTES_TAG, 8, MUTES_TAG);
     setupPageObservers(pageMutes, prefix + MUTES_TAG);
 
@@ -211,6 +215,7 @@ function createControl(cursorTrack, idPrefix) {
         pagePerf: pagePerf,
         pageVols: pageVols,
         pagePans: pagePans,
+        pageEq: pageEq,
         pageMutes: pageMutes,
         pageAllVols: pageAllVols,
         numberedPages: numberedPages,
@@ -331,6 +336,7 @@ function currentEncoderPage() {
     if (selectedPageIndex === -1) return a.pagePerf;
     if (selectedPageIndex === -2) return a.pageVols;
     if (selectedPageIndex === -3) return a.pagePans;
+    if (selectedPageIndex === -4) return a.pageEq;
     return a.numberedPages[selectedPageIndex];
 }
 
@@ -340,6 +346,7 @@ function currentEncoderPageId() {
     if (selectedPageIndex === -1) return a.prefix + PERF_TAG;
     if (selectedPageIndex === -2) return a.prefix + VOLS_TAG;
     if (selectedPageIndex === -3) return a.prefix + PANS_TAG;
+    if (selectedPageIndex === -4) return a.prefix + EQ_TAG;
     return a.prefix + PAGE_TAGS[selectedPageIndex];
 }
 
@@ -463,6 +470,9 @@ function handleNote(note, isPressed) {
         updateLEDs();
     } else if (encoderPushIndex === 2) {
         selectedPageIndex = (selectedPageIndex === -3) ? -1 : -3;
+        updateLEDs();
+    } else if (encoderPushIndex === 3) {
+        selectedPageIndex = (selectedPageIndex === -4) ? -1 : -4;
         updateLEDs();
     } else if (encoderPushIndex === 6) {
         activeTarget = 'A';

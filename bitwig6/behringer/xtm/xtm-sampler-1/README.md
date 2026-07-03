@@ -7,6 +7,15 @@ One of the `xtm-sampler-*` scripts. See `../README.md` for the family overview.
 - **A**: `Track 1/1`
 - **B**: `Track 2/3`
 
+## Encoder pages
+
+- **Encoder push 1**: `xtm-perf`
+- **Encoder push 2**: toggle `xtm-vols`
+- **Encoder push 3**: toggle `xtm-pans`
+- **Encoder push 4**: toggle `xtm-eq`
+
+Press again to return to `xtm-perf`. See `../README.md` for full mapping.
+
 ## Bottom row modes
 
 Default: page selector (`xtm-1` … `xtm-8`). Press the active page button again to return to `xtm-perf`.

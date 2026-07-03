@@ -26,25 +26,36 @@ This folder contains a family of controller scripts for the Behringer X-Touch Mi
 
 Each script targets a single track's primary device, switchable between its two bound tracks (A/B), and exposes a set of tagged remote control pages. Track detection is by name (case-insensitive) over a flat list of all project tracks, at any nesting depth. The two cursor tracks are pinned, so they stay attached to their bound tracks regardless of UI navigation / zoom.
 
+Tagged remote pages are picked up **live**: if you create a matching page mid-set (e.g. add `xtm-perf` on the target device), the script binds to it immediately with no script restart. This works because each tagged cursor page auto-selects its first matching page as soon as one appears.
+
+Remote page tags: `xtm-perf`, `xtm-vols`, `xtm-pans`, `xtm-eq`, `xtm-mutes`, `xtm-all-vols`, `xtm-1` … `xtm-8`.
+
 ### Encoder Mapping
 
-The 8 encoders map to the primary device's remote control pages of the active target. Page selection rules:
+The 8 encoders map to the primary device's remote control pages of the active target. Encoder-page selection:
 
 - Default (no selection): page tagged `xtm-perf`.
-- **Bottom Row Buttons 1-8**: select pages tagged `xtm-1` .. `xtm-8`.
-- Pressing the currently selected bottom button again clears the selection and returns to `xtm-perf`.
 - **Encoder Push 1**: select `xtm-perf`.
 - **Encoder Push 2**: toggle `xtm-vols` (press again to return to `xtm-perf`).
 - **Encoder Push 3**: toggle `xtm-pans` (press again to return to `xtm-perf`).
-- **Encoder Push 4-8**: unused.
+- **Encoder Push 4**: toggle `xtm-eq` (press again to return to `xtm-perf`).
+- **Encoder Push 5-6**: unused.
 
 Encoder LED rings reflect the current parameter values.
 
-### A/B Target
+### A/B Target Switch (Encoder Push 7/8)
 
-- **Button A**: switch encoder/button/fader focus to target A.
-- **Button B**: switch focus to target B.
-- A and B are mutually exclusive; the active target's LED is lit.
+- **Encoder Push 7**: switch encoder/button/fader focus to target A.
+- **Encoder Push 8**: switch focus to target B.
+- No dedicated LED for target selection.
+
+### Bottom Row Modes (Buttons A / B)
+
+The bottom button row has three modes. Default is **page selector**; the A and B buttons toggle the other two (press the active mode's button again to return to page selector). The A/B button LEDs light for the active mode.
+
+- **Page selector (default)**: bottom buttons 1-8 select pages tagged `xtm-1` .. `xtm-8`. Pressing the currently selected button again returns to `xtm-perf`.
+- **Button A → Clip launcher**: bottom buttons launch clips. Bank size is `BANK_SIZE` (default `3`, max `8`); only the first `BANK_SIZE` buttons are active. Clips are offset by the active instrument chain (chain 1 → clips 1..N, chain 2 → clips N+1.., etc.). Short press launches / re-triggers; long press (>0.5s) stops the track. LEDs reflect the playing clip.
+- **Button B → Chain selector**: bottom buttons 1-8 set the active chain index on the target's primary device. On chain switch, inactive chains go to −∞ dB and the active chain resets to 0 dB. LED shows the active chain.
 
 ### Button Mapping
 

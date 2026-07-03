@@ -87,6 +87,10 @@ Toggle **mute** on child tracks 1-8. LED reflects mute state.
 
 Toggle **record arm** on child tracks 1-8. LED reflects arm state.
 
+## Live Remote Page Pickup
+
+All tagged remote control pages (`c1`–`c8`, `p1`–`p8`, `c-perf-*`, `volumes`, etc.) are bound **live**. If you create or tag a matching page during a set, the script attaches to it immediately with no restart — each tagged cursor page auto-selects its first matching page as soon as one appears.
+
 ## Hardware Configuration
 
 The LCXL3 must be configured in a Custom Mode that sends on the appropriate MIDI channels. The script expects absolute CC values (0-127) with the following CC assignments:
