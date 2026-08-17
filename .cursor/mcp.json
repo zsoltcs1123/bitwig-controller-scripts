@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "wigai": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}${/}tools${/}wigai-mcp-proxy${/}proxy.mjs"],
+      "env": {
+        "WIGAI_URL": "http://localhost:61169/mcp"
+      }
+    }
+  }
+}

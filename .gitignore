@@ -1,0 +1,5 @@
+# Third-party Bitwig extension binaries (download from WigAI releases)
+references/**/*.bwextension
+
+# Local tool dependencies
+tools/**/node_modules/
