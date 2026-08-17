@@ -1,0 +1,8 @@
+{
+    "name": "xtm-sampler",
+    "version": "1.0",
+    "description": "Sampler track controller for Behringer X-Touch Mini (MC mode)",
+    "main": "xtm-sampler.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}

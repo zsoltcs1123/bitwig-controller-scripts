@@ -7,7 +7,7 @@ There is no runtime - this folder is scanned by Bitwig and I test script functio
 ## Bitwig API
 
 Bitwig provides a powerful API to interact with from the scripts. 
-You can find the full documentation in `./bitwig6/bitwig-6-api-documentation`.
+You can find the full documentation in `./references/bitwig/bitwig-6-api-documentation.md`.
 When you are developing scripts, always consult the documentation.
 
 ## Bitwig versions
@@ -32,15 +32,62 @@ A script consist of two files: a `.control.js` file which contains the code, and
 
 ## Folder structure
 
-The scripts files are to be placed in the `./bitwig6/` folder with the following sub-folder structure: 
+Scripts live under `./bitwig6/` in one of two layouts:
+
+**Suites** — scripts for different devices used together in one Bitwig project:
 
 ```
-./bitwig6/<manufacturer>/<controller-code>/script-name/
+./bitwig6/suites/<suite-name>/<script-name>/
 ```
 
-For example, the `lcxl-ar` script files for the Launch Control XL 3 from Novation are placed under:
+For example, the ZSAudio suite:
 
 ```
-./bitwig6/novation/lcxl3/lcxl-ar/
+./bitwig6/suites/zsaudio/
+├── README.md
+├── xtm-sampler/xtm-sampler-1/
+├── lcxl2-fx/
+└── lcxl3-ar/
 ```
+
+**Standalone** — scripts for a single controller, no manufacturer grouping:
+
+```
+./bitwig6/standalone/<script-name>/
+```
+
+Device reference material (MIDI maps, user guides, manuals) lives under:
+
+```
+./references/<manufacturer>/<device>/
+```
+
+For example, Launch Control XL 3 reference docs are at `./references/novation/lcxl3/`.
+
+## Commits
+
+Light conventional commits. One line only — no body.
+
+```
+<type>(<scope>): <subject>
+```
+
+**Types** (what kind of change):
+
+| type | use for |
+|------|---------|
+| `script` | controller scripts in `bitwig6/` or `bitwig5/` (`.control.js`, `package.json`, script README, suite README) |
+| `ref` | reference material — MIDI maps, user guides, manuals under `references/<manufacturer>/<device>/` |
+| `docs` | documentation — API docs, DAW docs, concepts, specs in `docs/`, `projects/`, `ideas.md` |
+| `example` | third-party or sample scripts in `examples/` |
+| `repo` | `AGENTS.md`, Cursor commands, folder layout |
+| `fix` | bug fix in an existing script |
+| `move` | rename or reorganize without editing content |
+
+**Scope** (optional): manufacturer/controller or script name — e.g. `novation/lcxl3`, `lcxl3-ar`, `behringer/xtm`, `nano-launch`.
+
+**Subject**: imperative, lowercase, no trailing period, under ~72 characters.
+
+**Body**: never. Subject only.
+
 

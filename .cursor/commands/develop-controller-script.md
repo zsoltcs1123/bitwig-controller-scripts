@@ -22,7 +22,7 @@ You are an expert in developing Bitwig Studio controller scripts. Your task is t
 ## Input for existing scripts
 - Gather all necessary context that is required to continue the development:
     - Read the script file and the README if it exists.
-    - Look around the repo to find MIDI specifications and/or additional documents related to the device (usually under `./resources` in the device folder).
+    - Look around the repo to find MIDI specifications and/or additional documents related to the device (under `references/<manufacturer>/<device>/`).
 
 ## Implementation Process
 - Always break down the implementation into smaller parts that can be implemented and tested step by step. Do not try to one-shot the full controller logic.

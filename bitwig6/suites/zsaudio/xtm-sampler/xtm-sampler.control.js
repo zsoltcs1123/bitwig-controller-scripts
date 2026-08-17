@@ -3,9 +3,9 @@ host.setShouldFailOnDeprecatedUse(false);
 
 host.defineController(
     "Behringer",
-    "X-Touch Mini Sampler 4",
+    "X-Touch Mini Sampler",
     "1.0",
-    "e5f6a7b8-c9d0-1234-5678-9abcdef00005",
+    "b2c3d4e5-f6a7-8901-2345-6789abcdef02",
     "Zsolt"
 );
 host.defineMidiPorts(1, 1);
@@ -21,11 +21,11 @@ const MAX_CHAINS = 8;
 const NUM_CLIPS = BANK_SIZE * 8;
 const LONG_PRESS_DELAY = 500;
 
-const TARGET_TRACK_A = "Track 2/3";
-const TARGET_TRACK_B = "Track 1/3";
+const TARGET_TRACK_A = "Track 1/1";
+const TARGET_TRACK_B = "Track 2/3";
 
-const CURSOR_ID = "xtm4";
-const CURSOR_NAME = "XTM4";
+const CURSOR_ID = "xtm";
+const CURSOR_NAME = "XTM";
 
 const PAGE_TAGS = ["xtm-1", "xtm-2", "xtm-3", "xtm-4", "xtm-5", "xtm-6", "xtm-7", "xtm-8"];
 const PERF_TAG = "xtm-perf";
