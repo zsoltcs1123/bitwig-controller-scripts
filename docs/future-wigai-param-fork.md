@@ -12,7 +12,7 @@ cursorDevice.createCursorRemoteControlsPage(8)
 
 That page **follows the remote page selected in Bitwig’s UI**. MCP tool calls can fight parallel UI use and only see the currently focused page.
 
-Tracked upstream: [WigAI issue #15](https://github.com/fabb/WigAI/issues/15) (opened by us).
+Tracked upstream: [WigAI issue #15](https://github.com/fabb/WigAI/issues/15) (opened by us). Partial relief in [wigai-full](https://github.com/glassdimly/wigai-full): `get_device_parameters` / `set_device_parameters` on any track/device without UI selection (this project pins wigai-full **0.16.0** — see `wigai-setup.md`).
 
 ## Fix (medium effort)
 

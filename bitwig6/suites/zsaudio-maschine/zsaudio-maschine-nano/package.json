@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-nano",
+    "version": "0.1.0",
+    "description": "NANO clip launcher and remote controls for Korg nanoKONTROL2",
+    "main": "zsaudio-maschine-nano.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}

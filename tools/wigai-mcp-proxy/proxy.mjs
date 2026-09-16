@@ -3,8 +3,8 @@
 /**
  * Stdio MCP proxy for WigAI.
  *
- * Cursor sends capabilities.elicitation.form (MCP 2025-11-25), but WigAI 0.10.1
- * uses MCP Java SDK 0.11.0 and rejects that field with HTTP 400. This proxy
+ * Cursor sends capabilities.elicitation.form (MCP 2025-11-25), but WigAI /
+ * wigai-full may still reject that field on direct HTTP. This proxy
  * strips unsupported client capabilities before forwarding to WigAI.
  */
 

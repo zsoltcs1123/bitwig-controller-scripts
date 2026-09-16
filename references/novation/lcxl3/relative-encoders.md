@@ -1,0 +1,1 @@
+https://support.novationmusic.com/hc/en-gb/articles/38440851693458-Using-Relative-Encoders
