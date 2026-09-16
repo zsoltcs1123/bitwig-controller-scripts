@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-main-drums",
+    "version": "0.1.0",
+    "description": "Main Drums controller for Behringer X-Touch Mini (MC mode)",
+    "main": "zsaudio-maschine-main-drums.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}

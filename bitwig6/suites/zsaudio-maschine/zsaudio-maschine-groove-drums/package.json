@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-groove-drums",
+    "version": "0.1.0",
+    "description": "Groove Drums controller for Behringer X-Touch Mini (MC mode)",
+    "main": "zsaudio-maschine-groove-drums.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}
