@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-loops",
+    "version": "0.1.0",
+    "description": "Loops clip launcher and remote controls for Korg nanoKONTROL2",
+    "main": "zsaudio-maschine-loops.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}

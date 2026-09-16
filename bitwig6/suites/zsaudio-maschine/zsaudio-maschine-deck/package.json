@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-deck",
+    "version": "0.1.0",
+    "description": "DECK A controller for Novation Launch Control XL 3 (Custom Mode)",
+    "main": "zsaudio-maschine-deck.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}
