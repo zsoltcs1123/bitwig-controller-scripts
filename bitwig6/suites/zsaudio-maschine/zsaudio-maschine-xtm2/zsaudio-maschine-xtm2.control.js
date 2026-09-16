@@ -2,7 +2,7 @@ loadAPI(25);
 host.setShouldFailOnDeprecatedUse(true);
 host.defineController(
     "Behringer",
-    "ZSAudio Maschine Groove Drums",
+    "ZSAudio Maschine XTM2",
     "0.1",
     "e5f6a7b8-c9d0-1234-ef56-789012345678",
     "Zsolt"
@@ -21,24 +21,26 @@ const MAX_CHAINS = 8;
 const NUM_CLIPS = BANK_SIZE * MAX_CHAINS;
 const LONG_PRESS_DELAY = 500;
 const FLAT_BANK_SIZE = 256;
-const TARGET_TRACK_NAME = "Groove Drums";
-const CURSOR_ID = "maschine-groove-drums";
-const CURSOR_NAME = "Maschine Groove Drums";
+const TARGET_TRACK_NAME = "XTM2";
+const DECK_TRACK_NAME = "DECK A";
+const DECK_P_TAG = "p2";
+const DECK_PAGE_ID = "xtm2-deck-p2";
+const DECK_ENCODER_COUNT = 3;
+const CURSOR_ID = "maschine-xtm2";
+const CURSOR_NAME = "Maschine XTM2";
+const DECK_CURSOR_ID = "maschine-xtm2-deck";
+const DECK_CURSOR_NAME = "Maschine XTM2 Deck";
 const MUTES_TAG = "mutes";
 const KILL_TAG = "kill";
 const CHAIN_KILL_TAG = "chainkill";
 const DEFAULT_TAG = "m0";
 const FADERS_TAG = "faders";
 const VOLS_TAG = "vols";
-const PANS_TAG = "pans";
-const EQ_TAG = "eq";
 const PAGE_TAGS = ["d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8"];
 
 const PAGE_INDEX_M0 = -1;
 const PAGE_INDEX_FADERS = -2;
 const PAGE_INDEX_VOLS = -3;
-const PAGE_INDEX_PANS = -4;
-const PAGE_INDEX_EQ = -5;
 
 const CC = {
     ENCODER_1: 16, ENCODER_2: 17, ENCODER_3: 18, ENCODER_4: 19,
@@ -78,11 +80,15 @@ const ENCODER_PUSH_NOTES = [
 let midiIn, midiOut;
 let detectBank = null;
 let cursorTrack = null;
+let cursorDeckTrack = null;
 let control = null;
+let pageDeckP = null;
 let found = false;
+let deckFound = false;
 let selectedIndex = -1;
+let deckSelectedIndex = -1;
 
-// PAGE_INDEX_M0, 0..7 = d1..d8, PAGE_INDEX_FADERS/VOLS/PANS/EQ
+// PAGE_INDEX_M0, 0..7 = d1..d8, PAGE_INDEX_FADERS/VOLS
 let selectedPageIndex = PAGE_INDEX_M0;
 // zero | A | B
 let bottomMode = "zero";
@@ -93,13 +99,17 @@ function init() {
     midiIn.setMidiCallback(onMidi);
 
     cursorTrack = host.createCursorTrack(CURSOR_ID, CURSOR_NAME, 0, NUM_CLIPS, false);    cursorTrack.isPinned().markInterested();
+    cursorDeckTrack = host.createCursorTrack(DECK_CURSOR_ID, DECK_CURSOR_NAME, 0, 0, false);
+    cursorDeckTrack.isPinned().markInterested();
     control = createControl(cursorTrack);
+    setupDeckEncoderPage();
 
     setupDetection();
     updateLEDs();
 
     host.scheduleTask(function () {
         cursorTrack.isPinned().set(true);
+        cursorDeckTrack.isPinned().set(true);
         resolveTargetTrack(true);
         updateLEDs();
         if (DEBUG) reportDebugStatus();
@@ -135,23 +145,19 @@ function createControl(track) {
     device.exists().markInterested();
     device.name().markInterested();
 
-    var prefix = "xtm-";
+    var prefix = "xtm2-";
     var pageMutes = device.createCursorRemoteControlsPage(prefix + MUTES_TAG, 8, MUTES_TAG);
     var pageKill = device.createCursorRemoteControlsPage(prefix + KILL_TAG, 1, KILL_TAG);
     var pageTrackKill = track.createCursorRemoteControlsPage(prefix + CHAIN_KILL_TAG, 8, CHAIN_KILL_TAG);
     var pageDefault = device.createCursorRemoteControlsPage(prefix + DEFAULT_TAG, 8, DEFAULT_TAG);
     var pageFaders = device.createCursorRemoteControlsPage(prefix + FADERS_TAG, 8, FADERS_TAG);
     var pageVols = device.createCursorRemoteControlsPage(prefix + VOLS_TAG, 8, VOLS_TAG);
-    var pagePans = device.createCursorRemoteControlsPage(prefix + PANS_TAG, 8, PANS_TAG);
-    var pageEq = device.createCursorRemoteControlsPage(prefix + EQ_TAG, 8, EQ_TAG);
     setupPageObservers(pageMutes, prefix + MUTES_TAG);
     setupPageObservers(pageKill, prefix + KILL_TAG, 1);
     markPageParams(pageTrackKill, 8);
     setupPageObservers(pageDefault, prefix + DEFAULT_TAG);
     setupPageObservers(pageFaders, prefix + FADERS_TAG);
     setupPageObservers(pageVols, prefix + VOLS_TAG);
-    setupPageObservers(pagePans, prefix + PANS_TAG);
-    setupPageObservers(pageEq, prefix + EQ_TAG);
 
     var chainSelector = device.createChainSelector();
     chainSelector.exists().markInterested();
@@ -205,8 +211,6 @@ function createControl(track) {
         pageDefault: pageDefault,
         pageFaders: pageFaders,
         pageVols: pageVols,
-        pagePans: pagePans,
-        pageEq: pageEq,
         numberedPages: numberedPages,
         chainSelector: chainSelector,
         clipSlots: clipSlots
@@ -242,18 +246,27 @@ function autoSelectPageWhenAvailable(page) {
     });
 }
 
-function findTrackIndex() {
+function findTrackIndex(name) {
     for (var i = 0; i < FLAT_BANK_SIZE; i++) {
         var t = detectBank.getItemAt(i);
-        if (t.exists().get() && t.name().get().toLowerCase() === TARGET_TRACK_NAME.toLowerCase()) {
+        if (t.exists().get() && t.name().get().toLowerCase() === name.toLowerCase()) {
             return i;
         }
     }
     return -1;
 }
 
+function setupDeckEncoderPage() {
+    var device = cursorDeckTrack.createDeviceBank(1).getDevice(0);
+    device.exists().markInterested();
+    device.name().markInterested();
+
+    pageDeckP = device.createCursorRemoteControlsPage(DECK_PAGE_ID, DECK_ENCODER_COUNT, DECK_P_TAG);
+    setupPageObservers(pageDeckP, DECK_PAGE_ID, DECK_ENCODER_COUNT);
+}
+
 function resolveTargetTrack(forceLog) {
-    var idx = findTrackIndex();
+    var idx = findTrackIndex(TARGET_TRACK_NAME);
     if (idx !== selectedIndex) {
         selectedIndex = idx;
         if (idx !== -1) {
@@ -269,6 +282,41 @@ function resolveTargetTrack(forceLog) {
         found = newFound;
         updateLEDs();
     }
+
+    var deckIdx = findTrackIndex(DECK_TRACK_NAME);
+    if (deckIdx !== deckSelectedIndex) {
+        deckSelectedIndex = deckIdx;
+        if (deckIdx !== -1) {
+            cursorDeckTrack.selectChannel(detectBank.getItemAt(deckIdx));
+        }
+    }
+
+    var newDeckFound = deckIdx !== -1;
+    if (forceLog || newDeckFound !== deckFound) {
+        status("deck " + (newDeckFound ? (DECK_TRACK_NAME + " @ index " + deckIdx) : "NOT FOUND"));
+    }
+    if (newDeckFound !== deckFound) {
+        deckFound = newDeckFound;
+        updateLEDs();
+    }
+}
+
+function encoderParamAt(encoderIndex) {
+    if (selectedPageIndex === PAGE_INDEX_M0 && encoderIndex < DECK_ENCODER_COUNT) {
+        if (!deckFound || !pageDeckP) {
+            return null;
+        }
+        return pageDeckP.getParameter(encoderIndex);
+    }
+    var page = currentEncoderPage();
+    if (!page) {
+        return null;
+    }
+    var paramIndex = encoderIndex;
+    if (selectedPageIndex === PAGE_INDEX_M0) {
+        paramIndex = encoderIndex - DECK_ENCODER_COUNT;
+    }
+    return page.getParameter(paramIndex);
 }
 
 function currentEncoderPage() {
@@ -276,8 +324,6 @@ function currentEncoderPage() {
     if (selectedPageIndex === PAGE_INDEX_M0) return control.pageDefault;
     if (selectedPageIndex === PAGE_INDEX_FADERS) return control.pageFaders;
     if (selectedPageIndex === PAGE_INDEX_VOLS) return control.pageVols;
-    if (selectedPageIndex === PAGE_INDEX_PANS) return control.pagePans;
-    if (selectedPageIndex === PAGE_INDEX_EQ) return control.pageEq;
     if (selectedPageIndex >= 0 && selectedPageIndex < 8) {
         return control.numberedPages[selectedPageIndex];
     }
@@ -293,8 +339,6 @@ function selectedPageTag() {
     if (selectedPageIndex === PAGE_INDEX_M0) return DEFAULT_TAG;
     if (selectedPageIndex === PAGE_INDEX_FADERS) return FADERS_TAG;
     if (selectedPageIndex === PAGE_INDEX_VOLS) return VOLS_TAG;
-    if (selectedPageIndex === PAGE_INDEX_PANS) return PANS_TAG;
-    if (selectedPageIndex === PAGE_INDEX_EQ) return EQ_TAG;
     if (selectedPageIndex >= 0 && selectedPageIndex < 8) return PAGE_TAGS[selectedPageIndex];
     return DEFAULT_TAG;
 }
@@ -338,6 +382,17 @@ function onParamValueChanged(id, paramIndex, value) {    if (!found || !control)
         updateUpperButtonLED(paramIndex, value);
         return;
     }
+    if (id === DECK_PAGE_ID && selectedPageIndex === PAGE_INDEX_M0) {
+        updateLEDRing(paramIndex, value);
+        return;
+    }
+    if (id === control.prefix + DEFAULT_TAG && selectedPageIndex === PAGE_INDEX_M0) {
+        var ringIndex = paramIndex + DECK_ENCODER_COUNT;
+        if (ringIndex < 8) {
+            updateLEDRing(ringIndex, value);
+        }
+        return;
+    }
     if (id === currentEncoderPageId()) {
         updateLEDRing(paramIndex, value);
     }
@@ -370,10 +425,7 @@ function handleCC(cc, value) {
     if (!found) return;
     var index = cc - CC.ENCODER_1;
     var increment = (value >= 1 && value <= 63) ? 1 : -1;
-    var page = currentEncoderPage();
-    if (!page) return;
-
-    var param = page.getParameter(index);
+    var param = encoderParamAt(index);
     if (param && param.exists().get()) {
         param.inc(increment * ENCODER_SENSITIVITY, ENCODER_RESOLUTION);
     }
@@ -433,8 +485,6 @@ function handleNote(note, isPressed) {
 function handleEncoderPush(index) {
     if (index === 0) selectEncoderPage(PAGE_INDEX_FADERS);
     else if (index === 1) selectEncoderPage(PAGE_INDEX_VOLS);
-    else if (index === 2) selectEncoderPage(PAGE_INDEX_PANS);
-    else if (index === 3) selectEncoderPage(PAGE_INDEX_EQ);
     else if (index === 7) selectEncoderPage(PAGE_INDEX_M0);
 }
 
@@ -546,15 +596,10 @@ function updateLEDs() {
     setButtonLED(NOTE.BUTTON_A, (bottomMode === "A") ? LED_STATE.ON : LED_STATE.OFF);
     setButtonLED(NOTE.BUTTON_B, (bottomMode === "B") ? LED_STATE.ON : LED_STATE.OFF);
 
-    var page = currentEncoderPage();
     for (var i = 0; i < 8; i++) {
-        if (page) {
-            var param = page.getParameter(i);
-            if (param && param.exists().get()) {
-                updateLEDRing(i, param.value().get());
-            } else {
-                setLEDRingValue(i, 0);
-            }
+        var param = encoderParamAt(i);
+        if (param && param.exists().get()) {
+            updateLEDRing(i, param.value().get());
         } else {
             setLEDRingValue(i, 0);
         }

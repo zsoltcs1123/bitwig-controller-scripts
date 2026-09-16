@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-xtm1",
+    "version": "0.1.0",
+    "description": "XTM1 controller for Behringer X-Touch Mini (MC mode)",
+    "main": "zsaudio-maschine-xtm1.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}
