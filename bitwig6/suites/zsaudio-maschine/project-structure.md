@@ -48,7 +48,7 @@ Scripts match pages by **tag** (Bitwig remote page tag), not by page display nam
 | **Track** remotes | `vols` | nanoKONTROL2 knobs (NANO) |
 | **Track** remotes | `m1`–`m8` | LCXL3 NANO filter/sends (modes 3, 11) only on **NANO** |
 | **Track** remotes | `u1`–`u8` | LCXL3 EQ-DJ (mode 15, slots 1–3) and Util (mode 6, slots 5–7) on **NANO** |
-| **Track** remotes | `pans` | LCXL3 Pan (mode 8) on **NANO** and **MASCHINE** group tracks (8 parameters) |
+| **Track** remotes | `pans` | LCXL3 Pan (mode 8) on **NANO** group track (8 parameters) |
 | **Track** remotes | `xtm1-mix`, `xtm2-mix`, `nano-mix`, `maschine-mix`, `fx1-mix`–`fx3-mix`, `master-mix`, `*-util`, `eq-gain`, `eq-freq`, `eq-q`, `comp`, `sidechain` | LCXL3 on **DECK A** (see deck README) |
 | **Track** remotes | `p1`, `p2` | X-Touch Mini encoders 1–3 on **DECK A** (XTM1 / XTM2 scripts) |
 | **Last device** on the group (usually **FX Layer**: Channel Strip Group, Channel Strip FX, or Channel Strip Deck) | `eq-gain`, `eq-freq`, `eq-q` | LCXL3 Group Control (mode 7) for **NANO** |
@@ -60,7 +60,7 @@ Do **not** put `m1`–`m8`, `u1`–`u8`, `faders`, or `vols` on a group’s **FX
 | Host | Tags | Used for |
 | --- | --- | --- |
 | **Primary device** (Instrument Selector or Drum Machine) | `m0`, `mutes`, `kill`, `faders`, `vols`, `d1`–`d8`, `m1`–`m8` | X-Touch Mini; LCXL3 filter/sends/EQ-DJ on XTM/MASCHINE |
-| **Primary device** | `pans` | LCXL3 Pan (mode 8) on **XTM1** and **XTM2** (8 parameters) |
+| **Primary device** | `pans` | LCXL3 Pan (mode 8) on **XTM1**, **XTM2**, and **MASCHINE** (8 parameters) |
 | **Primary device** | `u1`–`u8` | LCXL3 EQ-DJ (mode 15, slots 1–3) and Util (mode 6, slots 5–7) on **MASCHINE** |
 | **Track** remotes | `chainkill` | X-Touch Mini chain kill (XTM1 / XTM2) |
 | **Last device** on the track (**FX Layer**) | `eq-gain`, `eq-freq`, `eq-q` | LCXL3 Group Control (mode 7) |
@@ -68,6 +68,10 @@ Do **not** put `m1`–`m8`, `u1`–`u8`, `faders`, or `vols` on a group’s **FX
 ### Effect tracks (`FX1`–`FX3`, `Premaster`, …)
 
 Last device is typically **FX Layer** or **FX Selector** + **FX Layer**; deck **mix** remotes on **DECK A** point at send/return macros, not at FX track devices.
+
+| Host | Tags | Used for |
+| --- | --- | --- |
+| **Primary device** (FX Selector) | `perf` | LCXL3 **Sends** (mode 14) col **7** on **FX1**–**FX3** |
 
 ## Vertical layering
 

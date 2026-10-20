@@ -10,8 +10,8 @@ Mode numbers and performance/edit split: [`mode-map.md`](mode-map.md).
 
 1. **Channel identity** — One hue per logical track/bus. Same index on that **column** in DECK **Filter** (5) and **Sends** (13). Instrument **Filter and Sends** modes for a track use that track’s identity colour on **all eight columns**.
 2. **Functional modes** — **DECK Master** (mode **16**) uses a **frequency spectrum** on EQ cols 1–5. Comp + `sidechain` cols 6–8 use their own colours.
-3. **Placeholders** — Modes **1**, **2**, **8**, **14**, **15** use grey **1** until mapping is final.
-4. **Performance buttons** — Modes **3**, **4**, **5**, **9**, **10**, **11**, **12**, **13**: buttons **1–8** (top row) palette **9** (vibrant orange); buttons **9–16** (bottom row) palette **13** (bright yellow). Button MIDI channel **N**: message 1, bytes **+9** = `N`; for **N ≥ 2** also **+5** = `N−1`, **+6** = `0x10` (not `0x50` global). OLED (message 1): top row **`M1`…`M8`**, bottom **`S1`…`S8`** (3 ASCII chars per button, same as encoders).
+3. **Placeholders** — Modes **1**, **2**, **8** use grey **1** until mapping is final.
+4. **Performance buttons** — Modes **3**, **4**, **5**, **9**, **10**, **11**, **12**, **13**, **14**: buttons **1–8** (top row) palette **9** (vibrant orange); buttons **9–16** (bottom row) palette **13** (bright yellow). Button MIDI channel **N**: message 1, bytes **+9** = `N`; for **N ≥ 2** also **+5** = `N−1`, **+6** = `0x10` (not `0x50` global). OLED (message 1): top row **`M1`…`M8`**, bottom **`S1`…`S8`** (3 ASCII chars per button, same as encoders).
 
 Apply colours **per encoder** (all three rows in a column share one index in columnar modes). DECK Master: **one colour per EQ column** (gain, freq, and Q match); comp block is uniform.
 
@@ -52,7 +52,7 @@ TRACK_IDENTITY = { XTM1: 5, XTM2: 9, NANO: 37, MASCHINE: 53 }
 | NANO Sends | 11 | **37** all columns |
 | MASCHINE Sends | 12 | **53** all columns |
 | DECK Sends | 13 | `CHANNEL_IDENTITY` per column |
-| Sends Edit | 14 | grey **1** (TBD) |
+| Sends | 14 | **45** all encoders (FX identity) |
 | EQ-DJ | 15 | row **5 / 19 / 3** (red, green, white). Buttons **off** in `.syx`; script: top **5 / 9 / 37 / 53**, bottom **3** (white) |
 | DECK Master | 16 | `MODE8_EQ_COMP_*` (functional) |
 

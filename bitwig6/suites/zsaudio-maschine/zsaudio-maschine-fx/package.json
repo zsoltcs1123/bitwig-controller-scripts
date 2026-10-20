@@ -1,0 +1,8 @@
+{
+    "name": "zsaudio-maschine-fx",
+    "version": "0.1.0",
+    "description": "Premaster FX controller for Novation Launch Control XL 2 (User Mode 6)",
+    "main": "zsaudio-maschine-fx.control.js",
+    "author": "Zsolt",
+    "license": "ISC"
+}

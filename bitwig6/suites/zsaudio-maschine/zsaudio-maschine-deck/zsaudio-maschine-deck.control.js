@@ -11,9 +11,16 @@ host.defineController(
 
 host.defineMidiPorts(1, 1);
 
-var DEBUG = true;
+var DEBUG = false;
 var DECK_TRACK_NAME = "DECK A";
 var NANO_TRACK_NAME = "NANO";
+var FX_TRACK_NAMES = ["FX1", "FX2", "FX3"];
+var FX_UTIL_DECK_PAGE_INDEX = 4;
+var FX_SENDS_UTIL_PARAMS = 6;
+var FX_SENDS_MACRO_COL = 6;
+var FX_SENDS_CHAIN_COL = 7;
+var FX_PERF_TAG = "perf";
+var FX_PERF_PARAMS = 1;
 var CURSOR_ID = "maschine-deck";
 var CURSOR_NAME = "Maschine Deck";
 var CURSOR_NANO_ID = "maschine-deck-nano";
@@ -72,6 +79,7 @@ var CH_UTIL = 5;              // 6 — Util (edit)
 var CH_GROUP_CONTROL = 6;     // 7 — Group Control (edit)
 var CH_PAN = 7;               // 8 — Pan (edit)
 var CH_DECK_SENDS = 12;       // 13 — DECK Sends (perf)
+var CH_FX_SENDS = 13;         // 14 — FX Sends (perf)
 var CH_EQ_DJ = 14;            // 15 — EQ-DJ (edit)
 var CH_DECK_MASTER = 15;        // 16 — DECK Master (edit)
 var CH_XTM1_SENDS = 8;        // 9 — XTM1 Sends (perf)
@@ -104,6 +112,7 @@ var deckSet3Pages = [];
 var nanoMPages = [];
 var nanoUPages = [];
 var drumsBindings = [];
+var fxBindings = [];
 var parametricBindings = [];
 var parametricSelectedGroupIndex = 0;
 var groupControlTopOn = [false, false, false, false, false, false, false, false];
@@ -124,6 +133,23 @@ var utilEnterPending = false;
 var lastEncoderMidiChannel = -1;
 var lastEncoderMidiByKey = {};
 var debugOnceKeys = {};
+var resolveTracksTaskPending = false;
+var refreshAllLedsGeneration = 0;
+
+function createFxBinding(trackName, cursorId, cursorName, idPrefix) {
+    return {
+        trackName: trackName,
+        cursorId: cursorId,
+        cursorName: cursorName,
+        idPrefix: idPrefix,
+        cursor: null,
+        device: null,
+        chainSelector: null,
+        perfPage: null,
+        found: false,
+        selectedIndex: -1,
+    };
+}
 
 function createDrumsBinding(trackName, cursorId, cursorName, idPrefix, chEq, chSends) {
     return {
@@ -173,6 +199,20 @@ function init() {
         setupDrumsRemotes(binding);
     }
 
+    fxBindings = [
+        createFxBinding("FX1", "maschine-deck-fx1", "Maschine Deck FX1", "fx1-"),
+        createFxBinding("FX2", "maschine-deck-fx2", "Maschine Deck FX2", "fx2-"),
+        createFxBinding("FX3", "maschine-deck-fx3", "Maschine Deck FX3", "fx3-"),
+    ];
+    for (var f = 0; f < fxBindings.length; f++) {
+        var fxBinding = fxBindings[f];
+        fxBinding.cursor = host.createCursorTrack(
+            fxBinding.cursorId, fxBinding.cursorName, 0, 0, false
+        );
+        fxBinding.cursor.isPinned().markInterested();
+        setupFxRemotes(fxBinding);
+    }
+
     setupDeckRemotes();
     setupNanoRemotes();
     setupParametricBindings();
@@ -187,17 +227,16 @@ function init() {
         for (d = 0; d < drumsBindings.length; d++) {
             drumsBindings[d].cursor.isPinned().set(true);
         }
+        for (f = 0; f < fxBindings.length; f++) {
+            fxBindings[f].cursor.isPinned().set(true);
+        }
         resolveTargetTracks(true);
-        refreshAllEncoderLeds();
+        scheduleRefreshAllEncoderLeds();
     }, 200);
 
     host.scheduleTask(function () {
-        refreshAllEncoderLeds();
-    }, 1000);
-
-    host.scheduleTask(function () {
-        refreshAllEncoderLeds();
-    }, 3000);
+        scheduleRefreshAllEncoderLeds();
+    }, 800);
 
     if (DEBUG) {
         var focus = DEBUG_FOCUS_CHANNEL < 0
@@ -236,7 +275,7 @@ function logOnce(key, message) {
         return;
     }
     debugOnceKeys[key] = true;
-    status(message);
+    status(typeof message === "function" ? message() : message);
 }
 
 function encoderModeLabel(channel) {
@@ -245,6 +284,9 @@ function encoderModeLabel(channel) {
     }
     if (channel === CH_DECK_SENDS) {
         return "mode 13 DECK Sends";
+    }
+    if (channel === CH_FX_SENDS) {
+        return "mode 14 Sends";
     }
     if (channel === CH_NANO_FILTER) {
         return "mode 3 NANO Filter";
@@ -274,7 +316,8 @@ function debugEncoder(channel, message) {
     if (!shouldLogEncoderChannel(channel)) {
         return;
     }
-    status(encoderModeLabel(channel) + ": " + message);
+    var text = typeof message === "function" ? message() : message;
+    status(encoderModeLabel(channel) + ": " + text);
 }
 
 function describeEncoderParam(mode, column, row, param) {
@@ -302,6 +345,22 @@ function describeEncoderParam(mode, column, row, param) {
         }
         var utilName = param.exists().get() ? param.name().get() : "(not mapped)";
         return utilTag + " " + utilNames[row] + " — " + utilName;
+    }
+    if (mode.layout === "fxSends") {
+        var fxLabels = ["Lo", "Mid", "Hi", "Gai", "SC", "ST", "M", "Sel"];
+        var fxTag = DECK_UTIL_TAGS[FX_UTIL_DECK_PAGE_INDEX + row] || FX_TRACK_NAMES[row];
+        var fxLabel = fxLabels[column] || ("col " + (column + 1));
+        if (column === FX_SENDS_MACRO_COL) {
+            fxTag = FX_TRACK_NAMES[row] + " " + FX_PERF_TAG;
+        }
+        if (column === FX_SENDS_CHAIN_COL) {
+            return fxTag + " chain";
+        }
+        if (!param) {
+            return fxTag + " " + fxLabel + " (no param handle)";
+        }
+        var fxName = param.exists().get() ? param.name().get() : "(not mapped)";
+        return fxTag + " " + fxLabel + " — " + fxName;
     }
     if (mode.layout === "deckEqComp") {
         var deckEqTag = DECK_SET3_TAGS[row] || "?";
@@ -349,6 +408,27 @@ function describeEncoderParam(mode, column, row, param) {
     return "col " + (column + 1) + (tag ? " " + tag : "") + " slot " + slot + " — " + name;
 }
 
+function scheduleResolveTargetTracks() {
+    if (resolveTracksTaskPending) {
+        return;
+    }
+    resolveTracksTaskPending = true;
+    host.scheduleTask(function () {
+        resolveTracksTaskPending = false;
+        resolveTargetTracks();
+    }, 100);
+}
+
+function scheduleRefreshAllEncoderLeds() {
+    var generation = ++refreshAllLedsGeneration;
+    host.scheduleTask(function () {
+        if (generation !== refreshAllLedsGeneration) {
+            return;
+        }
+        refreshAllEncoderLeds();
+    }, 50);
+}
+
 function setupDetection() {
     var rootGroup = host.getProject().getRootTrackGroup();
     detectBank = rootGroup.createTrackBank(FLAT_BANK_SIZE, 0, 0, true);
@@ -356,8 +436,8 @@ function setupDetection() {
         var t = detectBank.getItemAt(i);
         t.exists().markInterested();
         t.name().markInterested();
-        t.exists().addValueObserver(function () { resolveTargetTracks(); });
-        t.name().addValueObserver(function () { resolveTargetTracks(); });
+        t.exists().addValueObserver(function () { scheduleResolveTargetTracks(); });
+        t.name().addValueObserver(function () { scheduleResolveTargetTracks(); });
     }
 }
 
@@ -435,6 +515,241 @@ function setupDeckRemotes() {
     }
     setupDeckEqCompEncoderLedObservers();
     setupGroupControlUtilEncoderLedObservers();
+    setupFxSendsEncoderLedObservers();
+}
+
+function setupFxRemotes(binding) {
+    var devBank = binding.cursor.createDeviceBank(1);
+    binding.device = devBank.getDevice(0);
+    binding.device.exists().markInterested();
+    binding.device.name().markInterested();
+    binding.device.exists().addValueObserver(function (exists) {
+        if (exists) {
+            scheduleRefreshAllEncoderLeds();
+        }
+    });
+
+    binding.chainSelector = binding.device.createChainSelector();
+    binding.chainSelector.exists().markInterested();
+    binding.chainSelector.chainCount().markInterested();
+    binding.chainSelector.activeChainIndex().markInterested();
+    binding.chainSelector.activeChainIndex().addValueObserver(function () {
+        scheduleRefreshAllEncoderLeds();
+    });
+    binding.chainSelector.chainCount().addValueObserver(function () {
+        scheduleRefreshAllEncoderLeds();
+    });
+    binding.chainSelector.exists().addValueObserver(function () {
+        scheduleRefreshAllEncoderLeds();
+    });
+
+    binding.perfPage = binding.device.createCursorRemoteControlsPage(
+        binding.idPrefix + FX_PERF_TAG, FX_PERF_PARAMS, FX_PERF_TAG
+    );
+    markPageParams(binding.perfPage, FX_PERF_PARAMS);
+}
+
+function setupFxSendsEncoderLedObservers() {
+    var row;
+    var col;
+    var utilCol;
+    for (row = 0; row < FX_TRACK_NAMES.length; row++) {
+        utilCol = FX_UTIL_DECK_PAGE_INDEX + row;
+        var utilPage = deckUtilPages[utilCol];
+        if (utilPage) {
+            for (col = 0; col < FX_SENDS_UTIL_PARAMS; col++) {
+                (function (encoderRow, column, paramIndex) {
+                    var param = utilPage.getParameter(paramIndex);
+                    param.value().addValueObserver(function () {
+                        updateFxSendsEncoderLed(encoderRow, column);
+                    });
+                    param.exists().addValueObserver(function () {
+                        updateFxSendsEncoderLed(encoderRow, column);
+                    });
+                })(row, col, fxSendsUtilParamIndex(col));
+            }
+        }
+        (function (encoderRow) {
+            var binding = fxBindings[encoderRow];
+            if (!binding || !binding.perfPage) {
+                return;
+            }
+            var macroParam = binding.perfPage.getParameter(0);
+            macroParam.value().addValueObserver(function () {
+                updateFxSendsEncoderLed(encoderRow, FX_SENDS_MACRO_COL);
+            });
+            macroParam.exists().addValueObserver(function () {
+                updateFxSendsEncoderLed(encoderRow, FX_SENDS_MACRO_COL);
+            });
+        })(row);
+    }
+}
+
+function selectFxTrackForRow(row) {
+    var binding = fxBindings[row];
+    if (!binding || !binding.found || binding.selectedIndex < 0) {
+        return;
+    }
+    binding.cursor.selectChannel(detectBank.getItemAt(binding.selectedIndex));
+}
+
+function fxUtilPageForRow(row) {
+    return deckUtilPages[FX_UTIL_DECK_PAGE_INDEX + row];
+}
+
+function fxSendsUtilParamIndex(column) {
+    if (column < 3) {
+        return column;
+    }
+    if (column < FX_SENDS_UTIL_PARAMS) {
+        return UTIL_PARAM_OFFSET + (column - 3);
+    }
+    return -1;
+}
+
+function fxChainLedValue(binding) {
+    var sel = binding.chainSelector;
+    if (!binding.found || !sel || !sel.exists().get()) {
+        return 0;
+    }
+    var count = sel.chainCount().get();
+    if (count <= 0) {
+        return 0;
+    }
+    if (count === 1) {
+        return 127;
+    }
+    return normalizedToMidi(sel.activeChainIndex().get() / (count - 1));
+}
+
+function resolveFxSendsParam(row, column) {
+    if (column < FX_SENDS_UTIL_PARAMS) {
+        if (!deckFound) {
+            return null;
+        }
+        var utilPage = fxUtilPageForRow(row);
+        if (!utilPage) {
+            return null;
+        }
+        var paramIndex = fxSendsUtilParamIndex(column);
+        if (paramIndex < 0) {
+            return null;
+        }
+        return utilPage.getParameter(paramIndex);
+    }
+    var binding = fxBindings[row];
+    if (!binding || !binding.found) {
+        return null;
+    }
+    if (column === FX_SENDS_MACRO_COL) {
+        if (!binding.perfPage) {
+            return null;
+        }
+        return binding.perfPage.getParameter(0);
+    }
+    return null;
+}
+
+function updateFxSendsEncoderLed(row, column) {
+    if (column === FX_SENDS_CHAIN_COL) {
+        var chainBinding = fxBindings[row];
+        if (!chainBinding) {
+            return;
+        }
+        sendEncoderLed(
+            CH_FX_SENDS, row, column,
+            fxChainLedValue(chainBinding)
+        );
+        return;
+    }
+    if (column < FX_SENDS_UTIL_PARAMS && !deckFound) {
+        return;
+    }
+    if (column >= FX_SENDS_MACRO_COL) {
+        var fxBinding = fxBindings[row];
+        if (!fxBinding || !fxBinding.found) {
+            return;
+        }
+    }
+    var param = resolveFxSendsParam(row, column);
+    sendEncoderLed(
+        CH_FX_SENDS, row, column,
+        paramLedValue(param)
+    );
+}
+
+function refreshFxSendsEncoderLeds() {
+    var row;
+    var col;
+    for (row = 0; row < FX_TRACK_NAMES.length; row++) {
+        for (col = 0; col < NUM_COLUMNS; col++) {
+            updateFxSendsEncoderLed(row, col);
+        }
+    }
+}
+
+function applyFxChainEncoderSteps(binding, delta) {
+    var sel = binding.chainSelector;
+    if (!sel || !sel.exists().get()) {
+        return;
+    }
+    var steps = Math.max(-8, Math.min(8, Math.round(delta / 4)));
+    if (steps === 0 && delta !== 0) {
+        steps = delta > 0 ? 1 : -1;
+    }
+    var i;
+    for (i = 0; i < Math.abs(steps); i++) {
+        if (steps > 0) {
+            sel.cycleNext();
+        } else {
+            sel.cyclePrevious();
+        }
+    }
+}
+
+function applyFxChainEncoderMidi(channel, row, column, cc, midiValue) {
+    var binding = fxBindings[row];
+    if (!binding || !binding.found) {
+        return;
+    }
+    selectFxTrackForRow(row);
+    var sel = binding.chainSelector;
+    if (!sel || !sel.exists().get()) {
+        logOnce("fx-chain-unmap-ch-" + channel + "-r" + row,
+            encoderModeLabel(channel) + " — " + binding.trackName + " chain (no selector)");
+        return;
+    }
+    var key = encoderStateKey(channel, cc);
+    var expectedMidi = fxChainLedValue(binding);
+    var previousMidi = lastEncoderMidiByKey[key];
+
+    if (previousMidi === undefined) {
+        lastEncoderMidiByKey[key] = midiValue;
+        sendEncoderLed(channel, row, column, expectedMidi);
+        debugEncoder(channel, function () {
+            return "pickup " + binding.trackName + " chain hw=" + midiValue + " led=" + expectedMidi;
+        });
+        return;
+    }
+    if (midiValue === previousMidi) {
+        return;
+    }
+    lastEncoderMidiByKey[key] = midiValue;
+    var delta = encoderDelta(previousMidi, midiValue);
+    if (delta !== 0) {
+        applyFxChainEncoderSteps(binding, delta);
+        debugEncoder(channel, function () {
+            return "chain " + binding.trackName + " delta=" + delta;
+        });
+    }
+}
+
+function isFxSendsEncoderReady(row, column) {
+    if (column < FX_SENDS_UTIL_PARAMS) {
+        return deckFound;
+    }
+    var binding = fxBindings[row];
+    return binding && binding.found;
 }
 
 function setupGroupControlUtilEncoderLedObservers() {
@@ -566,7 +881,7 @@ function setupDrumsRemotes(binding) {
     binding.device.name().markInterested();
     binding.device.exists().addValueObserver(function (exists) {
         if (exists) {
-            refreshAllEncoderLeds();
+            scheduleRefreshAllEncoderLeds();
         }
     });
 
@@ -1022,7 +1337,7 @@ function setupPanRemotes() {
         createPanRemotePage(drumsBindings[0].device, "xtm1-pans-"),
         createPanRemotePage(drumsBindings[1].device, "xtm2-pans-"),
         createPanRemotePage(cursorNanoTrack, "nano-pans-"),
-        createPanRemotePage(drumsBindings[2].cursor, "machine-pans-"),
+        createPanRemotePage(drumsBindings[2].device, "machine-pans-"),
     ];
     setupPanEncoderLedObservers();
 }
@@ -1376,6 +1691,10 @@ function refreshChannelEncoderLeds(channel) {
         refreshUtilEncoderLeds();
         return;
     }
+    if (mode.layout === "fxSends") {
+        refreshFxSendsEncoderLeds();
+        return;
+    }
     var col;
     var row;
     for (col = 0; col < NUM_COLUMNS; col++) {
@@ -1407,6 +1726,7 @@ function refreshAllEncoderLeds() {
     refreshEqDjEncoderLeds();
     refreshPanEncoderLeds();
     refreshUtilEncoderLeds();
+    refreshFxSendsEncoderLeds();
 }
 
 function encoderModeForChannel(channel) {
@@ -1463,6 +1783,12 @@ function encoderModeForChannel(channel) {
             trackReady: deckFound,
         };
     }
+    if (channel === CH_FX_SENDS) {
+        return {
+            layout: "fxSends",
+            trackReady: deckFound,
+        };
+    }
     if (channel === CH_GROUP_CONTROL) {
         return {
             layout: "parametricEq",
@@ -1514,23 +1840,85 @@ function autoSelectPageWhenAvailable(page) {
             page.selectedPageIndex().set(0);
         }
         if (count > 0) {
-            refreshAllEncoderLeds();
+            scheduleRefreshAllEncoderLeds();
         }
     });
 }
 
-function findTrackIndex(name) {
-    for (var i = 0; i < FLAT_BANK_SIZE; i++) {
-        var t = detectBank.getItemAt(i);
-        if (t.exists().get() && t.name().get().toLowerCase() === name.toLowerCase()) {
-            return i;
+function namedTracksScanComplete(deckIdx, nanoIdx, drumIdx, fxIdx) {
+    if (deckIdx === -1 || nanoIdx === -1) {
+        return false;
+    }
+    for (var d = 0; d < drumsBindings.length; d++) {
+        if (drumIdx[d] === -1) {
+            return false;
         }
     }
-    return -1;
+    for (var f = 0; f < fxBindings.length; f++) {
+        if (fxIdx[f] === -1) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function scanNamedTrackIndices() {
+    var deckIdx = -1;
+    var nanoIdx = -1;
+    var drumIdx = [];
+    var fxIdx = [];
+    var d;
+    var f;
+    for (d = 0; d < drumsBindings.length; d++) {
+        drumIdx[d] = -1;
+    }
+    for (f = 0; f < fxBindings.length; f++) {
+        fxIdx[f] = -1;
+    }
+    var deckLower = DECK_TRACK_NAME.toLowerCase();
+    var nanoLower = NANO_TRACK_NAME.toLowerCase();
+    var drumLower = [];
+    for (d = 0; d < drumsBindings.length; d++) {
+        drumLower[d] = drumsBindings[d].trackName.toLowerCase();
+    }
+    var fxLower = [];
+    for (f = 0; f < fxBindings.length; f++) {
+        fxLower[f] = fxBindings[f].trackName.toLowerCase();
+    }
+    for (var i = 0; i < FLAT_BANK_SIZE; i++) {
+        if (namedTracksScanComplete(deckIdx, nanoIdx, drumIdx, fxIdx)) {
+            break;
+        }
+        var t = detectBank.getItemAt(i);
+        if (!t.exists().get()) {
+            continue;
+        }
+        var nameLower = t.name().get().toLowerCase();
+        if (deckIdx === -1 && nameLower === deckLower) {
+            deckIdx = i;
+        }
+        if (nanoIdx === -1 && nameLower === nanoLower) {
+            nanoIdx = i;
+        }
+        for (d = 0; d < drumsBindings.length; d++) {
+            if (drumIdx[d] === -1 && nameLower === drumLower[d]) {
+                drumIdx[d] = i;
+            }
+        }
+        for (f = 0; f < fxBindings.length; f++) {
+            if (fxIdx[f] === -1 && nameLower === fxLower[f]) {
+                fxIdx[f] = i;
+            }
+        }
+    }
+    return { deck: deckIdx, nano: nanoIdx, drums: drumIdx, fx: fxIdx };
 }
 
 function resolveTargetTracks(forceLog) {
-    var deckIdx = findTrackIndex(DECK_TRACK_NAME);
+    var indices = scanNamedTrackIndices();
+    var deckIdx = indices.deck;
+    var ledsNeedRefresh = false;
+
     if (deckIdx !== deckSelectedIndex) {
         deckSelectedIndex = deckIdx;
         if (deckIdx !== -1) {
@@ -1542,8 +1930,11 @@ function resolveTargetTracks(forceLog) {
     if (forceLog || newDeckFound !== deckFound) {
         status("deck " + (newDeckFound ? (DECK_TRACK_NAME + " @ " + deckIdx) : "NOT FOUND"));
     }
+    if (newDeckFound !== deckFound) {
+        ledsNeedRefresh = true;
+    }
 
-    var nanoIdx = findTrackIndex(NANO_TRACK_NAME);
+    var nanoIdx = indices.nano;
     if (nanoIdx !== nanoSelectedIndex) {
         nanoSelectedIndex = nanoIdx;
         if (nanoIdx !== -1) {
@@ -1554,11 +1945,13 @@ function resolveTargetTracks(forceLog) {
     if (forceLog || newNanoFound !== nanoFound) {
         status("nano " + (newNanoFound ? (NANO_TRACK_NAME + " @ " + nanoIdx) : "NOT FOUND"));
     }
+    if (newNanoFound !== nanoFound) {
+        ledsNeedRefresh = true;
+    }
 
-    var anyDrumsNewlyFound = false;
     for (var d = 0; d < drumsBindings.length; d++) {
         var binding = drumsBindings[d];
-        var idx = findTrackIndex(binding.trackName);
+        var idx = indices.drums[d];
         if (idx !== binding.selectedIndex) {
             binding.selectedIndex = idx;
             if (idx !== -1) {
@@ -1570,25 +1963,47 @@ function resolveTargetTracks(forceLog) {
             status(binding.trackName.toLowerCase() + " " +
                 (newFound ? ("@ " + idx) : "NOT FOUND"));
         }
-        if (newFound && !binding.found) {
-            anyDrumsNewlyFound = true;
+        if (newFound !== binding.found) {
+            ledsNeedRefresh = true;
         }
         binding.found = newFound;
     }
 
-    if ((newDeckFound && !deckFound) || (newNanoFound && !nanoFound) || anyDrumsNewlyFound) {
-        refreshAllEncoderLeds();
+    for (var f = 0; f < fxBindings.length; f++) {
+        var fxBinding = fxBindings[f];
+        var fxTrackIdx = indices.fx[f];
+        if (fxTrackIdx !== fxBinding.selectedIndex) {
+            fxBinding.selectedIndex = fxTrackIdx;
+            if (fxTrackIdx !== -1) {
+                fxBinding.cursor.selectChannel(detectBank.getItemAt(fxTrackIdx));
+            }
+        }
+        var newFxFound = fxTrackIdx !== -1;
+        if (forceLog || newFxFound !== fxBinding.found) {
+            status(fxBinding.trackName.toLowerCase() + " " +
+                (newFxFound ? ("@ " + fxTrackIdx) : "NOT FOUND"));
+        }
+        if (newFxFound !== fxBinding.found) {
+            ledsNeedRefresh = true;
+        }
+        fxBinding.found = newFxFound;
     }
+
     deckFound = newDeckFound;
     nanoFound = newNanoFound;
 
     for (var p = 0; p < parametricBindings.length; p++) {
-        parametricBindings[p].found = parametricBindingFound(parametricBindings[p]);
+        var wasFound = parametricBindings[p].found;
+        var nowFound = parametricBindingFound(parametricBindings[p]);
+        parametricBindings[p].found = nowFound;
+        if (wasFound !== nowFound) {
+            ledsNeedRefresh = true;
+        }
     }
-    refreshParametricEncoderLeds();
-    refreshEqDjEncoderLeds();
-    refreshPanEncoderLeds();
-    refreshUtilEncoderLeds();
+
+    if (ledsNeedRefresh) {
+        scheduleRefreshAllEncoderLeds();
+    }
 }
 
 function onMidi(status, data1, data2) {
@@ -1736,6 +2151,9 @@ function onEncoderMidiChannelChange(previousChannel, channel) {
 }
 
 function resolveEncoderParam(mode, column, row) {
+    if (mode.layout === "fxSends") {
+        return resolveFxSendsParam(row, column);
+    }
     if (mode.layout === "deckEqComp") {
         return resolveDeckEqCompParam(row, column);
     }
@@ -1807,6 +2225,9 @@ function encoderDelta(previousMidi, midiValue) {
 }
 
 function encoderTargetReady(mode, row, column) {
+    if (mode.layout === "fxSends") {
+        return isFxSendsEncoderReady(row, column);
+    }
     if (mode.layout === "parametricEq") {
         return isGroupControlEncoderReady(row, column);
     }
@@ -1814,6 +2235,13 @@ function encoderTargetReady(mode, row, column) {
 }
 
 function applyEncoderMidi(channel, row, column, cc, midiValue, mode) {
+    if (mode.layout === "fxSends" && column === FX_SENDS_CHAIN_COL) {
+        applyFxChainEncoderMidi(channel, row, column, cc, midiValue);
+        return;
+    }
+    if (mode.layout === "fxSends" && column >= FX_SENDS_MACRO_COL) {
+        selectFxTrackForRow(row);
+    }
     if (!encoderTargetReady(mode, row, column)) {
         logOnce("track-not-ready-ch-" + channel + "-c" + column + "-r" + row,
             encoderModeLabel(channel) + " — target not ready for col " + (column + 1) +
@@ -1822,8 +2250,10 @@ function applyEncoderMidi(channel, row, column, cc, midiValue, mode) {
     }
     var param = resolveEncoderParam(mode, column, row);
     if (!paramIsMapped(param)) {
-        logOnce("unmap-ch-" + channel + "-c" + column + "-r" + row,
-            encoderModeLabel(channel) + " — " + describeEncoderParam(mode, column, row, param));
+        logOnce("unmap-ch-" + channel + "-c" + column + "-r" + row, function () {
+            return encoderModeLabel(channel) + " — " +
+                describeEncoderParam(mode, column, row, param);
+        });
         return;
     }
     var key = encoderStateKey(channel, cc);
@@ -1833,8 +2263,10 @@ function applyEncoderMidi(channel, row, column, cc, midiValue, mode) {
     if (previousMidi === undefined) {
         lastEncoderMidiByKey[key] = midiValue;
         sendEncoderLed(channel, row, column, expectedMidi);
-        debugEncoder(channel, "pickup " + describeEncoderParam(mode, column, row, param) +
-            " hw=" + midiValue + " led=" + expectedMidi);
+        debugEncoder(channel, function () {
+            return "pickup " + describeEncoderParam(mode, column, row, param) +
+                " hw=" + midiValue + " led=" + expectedMidi;
+        });
         return;
     }
 
@@ -1846,8 +2278,10 @@ function applyEncoderMidi(channel, row, column, cc, midiValue, mode) {
     var delta = encoderDelta(previousMidi, midiValue);
     if (delta !== 0) {
         param.inc(delta / 127.0);
-        debugEncoder(channel, "inc " + describeEncoderParam(mode, column, row, param) +
-            " delta=" + delta);
+        debugEncoder(channel, function () {
+            return "inc " + describeEncoderParam(mode, column, row, param) +
+                " delta=" + delta;
+        });
     }
 }
 

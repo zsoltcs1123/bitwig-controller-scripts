@@ -11,7 +11,7 @@ See [`../project-structure.md`](../project-structure.md) for the project layout.
 3. Tag remote control pages (see [`../project-structure.md`](../project-structure.md) — **Remote control placement**):
    - **DECK A** (**group track** remotes only): `faders` — physical faders (all modes). Mix — `xtm1-mix`, `xtm2-mix`, `nano-mix`, `maschine-mix`, `fx1-mix`, `fx2-mix`, `fx3-mix`, `master-mix` (7 parameters each). Set 3 — `eq-gain`, `eq-freq`, `eq-q`, `comp`, `sidechain` on the **track** (8 parameters each; **DECK Master** edit mode 16 uses subsets as below; `sidechain` uses slots **1–3** for RS / FL / GN). `p1` / `p2` for X-Touch Mini (XTM scripts), not LCXL3. Edit **Util** (mode 6) does not use DECK A `*-util` pages.
    - **NANO** (**group track** remotes): `m1`–`m8` — modes 3 and 11 (slots 1–3 filter, 5–7 sends). `u1`–`u8` — mode 15 EQ-DJ (slots 1–3) and mode 6 Util (slots 5–7: gain, sidechain, width). `pans` — mode 8 Pan (8 parameters). Do not put these tags on NANO’s FX Layer device.
-   - **XTM1**, **XTM2**, **MASCHINE** (**primary device**): `m1`–`m8` (7 parameters each). Filter performance modes: slots 1–3; Sends modes: slots 5–7. **Pan** (mode 8): XTM1/2 use `pans` on the primary device (8 parameters). **EQ-DJ** (mode 15): XTM1/2 use `m1`–`m8` slots 1–3; MASCHINE also uses `u1`–`u8` slots 1–3 on the primary device. **Util** (mode 6): MASCHINE `u1`–`u8` slots 5–7. XTM1 and XTM2 have no util pages. **MASCHINE** `pans` for mode 8 lives on the **group track**, not the primary device.
+   - **XTM1**, **XTM2**, **MASCHINE** (**primary device**): `m1`–`m8` (7 parameters each). Filter performance modes: slots 1–3; Sends modes: slots 5–7. **Pan** (mode 8): `pans` on the primary device (8 parameters) on **XTM1**, **XTM2**, and **MASCHINE**. **EQ-DJ** (mode 15): XTM1/2 use `m1`–`m8` slots 1–3; MASCHINE also uses `u1`–`u8` slots 1–3 on the primary device. **Util** (mode 6): MASCHINE `u1`–`u8` slots 5–7. XTM1 and XTM2 have no util pages.
    - **Group Control** (mode 7): `eq-gain`, `eq-freq`, `eq-q` on the **last device** on **XTM1**, **XTM2**, **NANO**, and **MASCHINE** (typically **FX Layer**). Bands 1–5 use slots 0–4 on each row. Top row cols **6–8** map to **DECK A** `xtm1-util` / `xtm2-util` / `nano-util` / `maschine-util` parameters **5–7** for the selected group.
 
 Pinned to **DECK A**, **XTM1**, **XTM2**, **MASCHINE**, and **NANO**. Track names matched case-insensitively in the flat track list.
@@ -36,6 +36,19 @@ Eight columns × three encoder rows. Each **column** is one remote page; each **
 
 Slot 4 is unused on the second bank.
 
+### Sends (performance mode 14)
+
+Three **horizontal** rows (FX1 / FX2 / FX3). Eight columns per row:
+
+| Cols | Mapping |
+| --- | --- |
+| 1–3 | DECK A `fxN-util` remote params **1–3** (Lo / Mid / Hi) |
+| 4–6 | DECK A `fxN-util` remote params **5–7** (Gai / SC / ST) |
+| 7 | **FXN** track — primary device page tagged **`perf`**, param **1** (selects track when turned) |
+| 8 | **FXN** — FX Selector chain (if present; selects track when turned) |
+
+Pinned to **FX1**, **FX2**, **FX3** by name. Ring colour **FX identity** (palette **45**) in `.syx`.
+
 ## Mode map
 
 Canonical list (performance vs edit, button indirection): [`../lcxl3/mode-map.md`](../lcxl3/mode-map.md).
@@ -54,6 +67,7 @@ Modes are selected on the LCXL3 by MIDI channel in Custom Mode (**mode number = 
 | 11 | 11 | NANO Sends | NANO | Columnar: `m1`–`m8`, slots 5–7 |
 | 12 | 12 | MASCHINE Sends | MASCHINE | Columnar: `m1`–`m8`, slots 5–7 |
 | 13 | 13 | DECK Sends | DECK A mix | Columnar: slots 5–7 (`*-mix`) |
+| 14 | 14 | Sends | DECK A `fx*-util` + FX tracks | Horizontal: 3 rows = FX1–FX3 |
 
 ### Edit (`.syx` only until later steps)
 
@@ -62,7 +76,6 @@ Modes are selected on the LCXL3 by MIDI channel in Custom Mode (**mode number = 
 | 6 | Util | Yes — see below |
 | 7 | Group Control | Yes — see below |
 | 8 | Pan | Yes — see below |
-| 14 | Sends Edit | TBD |
 | 15 | EQ-DJ | Yes — see below |
 | 16 | DECK Master | Yes — see below |
 
@@ -103,8 +116,8 @@ Top row buttons **1–4** select the group (default **1** when you enter the mod
 
 | Group | Remote host | Page tag |
 | --- | --- | --- |
-| XTM1, XTM2 | Primary device | `pans` |
-| NANO, MASCHINE | Group track | `pans` |
+| XTM1, XTM2, MASCHINE | Primary device | `pans` |
+| NANO | Group track | `pans` |
 
 **Buttons:** top row **1–4** = group (default **1** on enter, one LED). Bottom row and top buttons **5–8** are unused (script turns them back off).
 

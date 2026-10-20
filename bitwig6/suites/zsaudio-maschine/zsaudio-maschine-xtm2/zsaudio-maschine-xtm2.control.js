@@ -20,6 +20,7 @@ const BANK_SIZE = 8;
 const MAX_CHAINS = 8;
 const NUM_CLIPS = BANK_SIZE * MAX_CHAINS;
 const LONG_PRESS_DELAY = 500;
+const FADER_TOUCH_MS = 200;
 const FLAT_BANK_SIZE = 256;
 const TARGET_TRACK_NAME = "XTM2";
 const DECK_TRACK_NAME = "DECK A";
@@ -93,6 +94,7 @@ let selectedPageIndex = PAGE_INDEX_M0;
 // zero | A | B
 let bottomMode = "zero";
 let clipButtonStates = {};
+let faderGesture = 0;
 function init() {
     midiIn = host.getMidiInPort(0);
     midiOut = host.getMidiOutPort(0);
@@ -372,9 +374,17 @@ function getChainKillParam(chainIndex) {
     return null;
 }
 
+function userSet(param, value) {
+    param.touch(true);
+    param.set(value);
+    host.scheduleTask(function () {
+        param.touch(false);
+    }, 0);
+}
+
 function setChainKill(chainIndex, muted) {
     var param = getChainKillParam(chainIndex);
-    if (param) param.setImmediately(muted ? 1 : 0);
+    if (param) userSet(param, muted ? 1 : 0);
 }
 
 function onParamValueChanged(id, paramIndex, value) {    if (!found || !control) return;
@@ -434,9 +444,14 @@ function handleCC(cc, value) {
 function handleFader(value) {
     if (!found || !control) return;
     var param = control.pageKill.getParameter(0);
-    if (param && param.exists().get()) {
-        param.setImmediately(1 - (value / 16383));
-    }
+    if (!param || !param.exists().get()) return;
+    param.touch(true);
+    param.set(1 - (value / 16383));
+    var gesture = ++faderGesture;
+    host.scheduleTask(function () {
+        if (gesture !== faderGesture) return;
+        param.touch(false);
+    }, FADER_TOUCH_MS);
 }
 
 function handleNote(note, isPressed) {
@@ -458,7 +473,7 @@ function handleNote(note, isPressed) {
         if (!found || !control) return;
         var muteParam = control.pageMutes.getParameter(upperIndex);
         if (muteParam && muteParam.exists().get()) {
-            muteParam.setImmediately(muteParam.value().get() > 0.5 ? 0 : 1);
+            userSet(muteParam, muteParam.value().get() > 0.5 ? 0 : 1);
         }
         return;
     }

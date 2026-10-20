@@ -40,7 +40,8 @@ DECK_UTIL_ROW_COLOURS = [5, 9, 13]  # vibrant red, orange, yellow (bright)
 # Performance modes: top button row 1–8 (`0x30`–`0x37`), bottom row 9–16 (`0x38`–`0x3f`).
 PERF_BUTTON_TOP_ORANGE = 9
 PERF_BUTTON_BOTTOM_YELLOW = 13
-PERFORMANCE_MODES = {3, 4, 5, 9, 10, 11, 12, 13}
+PERFORMANCE_MODES = {3, 4, 5, 9, 10, 11, 12, 13, 14}
+FX_IDENTITY = 45  # vibrant dark blue — FX1/2/3 cols in DECK Filter/Sends
 
 PARAMETRIC_EQ_GROUP_BUTTON_COLOURS = [
     TRACK_IDENTITY["XTM1"],
@@ -429,6 +430,11 @@ def rows_fx_sends() -> list[list[bytes | None]]:
     return [[b"FX1"] * 8, [b"FX2"] * 8, [b"FX3"] * 8]
 
 
+def rows_fx_util_sends() -> list[list[bytes | None]]:
+    labels = [b"Lo ", b"Mid", b"Hi ", b"Gai", b"SC ", b"ST ", b"M  ", b"Sel"]
+    return [labels, labels, labels]
+
+
 def rows_group_control() -> list[list[bytes | None]]:
     util_top = [b"GN ", b"SC ", b"ST "]
     rows: list[list[bytes | None]] = []
@@ -542,7 +548,7 @@ def main() -> None:
     w(11, "NANO Sends", lambda m: apply_uniform_colour(m, TRACK_IDENTITY["NANO"]), rows_fx_sends())
     w(12, "MASCHINE Sends", lambda m: apply_uniform_colour(m, TRACK_IDENTITY["MASCHINE"]), rows_fx_sends())
     w(13, "DECK Sends", lambda m: apply_column_colours(m, CHANNEL_IDENTITY), rows_fx_sends())
-    w(14, "Sends Edit", grey, rows_blank())
+    w(14, "Sends", lambda m: apply_uniform_colour(m, FX_IDENTITY), rows_fx_util_sends())
     w(15, "EQ-DJ", lambda m: apply_row_colours(m, EQ_DJ_ROW_COLOURS), rows_low_mid_high())
     w(16, "DECK Master", apply_mode8_eq_comp_colours, rows_mode8_eq_comp())
 
