@@ -9,10 +9,10 @@ See [`../project-structure.md`](../project-structure.md) for the project layout.
 1. Add the script in **Preferences → Controllers** (device: Launch Control XL 3).
 2. Configure the LCXL3 in **Custom Mode** with the CC layout below. Upload `.syx` from [`../lcxl3/`](../lcxl3/) (see [`../lcxl3/mode-map.md`](../lcxl3/mode-map.md) and `colors.md`; run `build_modes.py` to regenerate). `.syx` layout: [`references/novation/lcxl3/lcxl3-custom-mode-syx-notes.md`](../../../references/novation/lcxl3/lcxl3-custom-mode-syx-notes.md).
 3. Tag remote control pages (see [`../project-structure.md`](../project-structure.md) — **Remote control placement**):
-   - **DECK A** (**group track** remotes only): `faders` — physical faders (all modes). Mix — `xtm1-mix`, `xtm2-mix`, `nano-mix`, `maschine-mix`, `fx1-mix`, `fx2-mix`, `fx3-mix`, `master-mix` (7 parameters each). Util — same stems with `-util` suffix (edit **Util** mode, later). Set 3 — `eq-gain`, `eq-freq`, `eq-q`, `comp`, `sc` on the **track** (8 parameters each; **Master EQ** edit mode 16 uses subsets as below; `sc` uses slots 1–3). `p1` / `p2` for X-Touch Mini (XTM scripts), not LCXL3.
-   - **NANO** (**group track** remotes): `m1`–`m8` — modes 3 and 11 (slots 1–3 filter, 5–7 sends). `u1`–`u8` — mode 15 EQ-DJ (slots 1–3). Do not put these tags on NANO’s FX Layer device.
-   - **XTM1**, **XTM2**, **MASCHINE** (**primary device**): `m1`–`m8` (7 parameters each). Filter performance modes: slots 1–3; Sends modes: slots 5–7. **EQ-DJ** (mode 15): XTM1/2 use `m1`–`m8` slots 1–3; MASCHINE also uses `u1`–`u8` slots 1–3 on the primary device.
-   - **Parametric EQ** (mode 7): `eq-gain`, `eq-freq`, `eq-q` on the **last device** on **XTM1**, **XTM2**, **NANO**, and **MASCHINE** (typically **FX Layer** — Channel Strip Group / FX / Deck). Bands 1–5 use slots 0–4 on each row. Not on the group track for NANO.
+   - **DECK A** (**group track** remotes only): `faders` — physical faders (all modes). Mix — `xtm1-mix`, `xtm2-mix`, `nano-mix`, `maschine-mix`, `fx1-mix`, `fx2-mix`, `fx3-mix`, `master-mix` (7 parameters each). Set 3 — `eq-gain`, `eq-freq`, `eq-q`, `comp`, `sidechain` on the **track** (8 parameters each; **DECK Master** edit mode 16 uses subsets as below; `sidechain` uses slots **1–3** for RS / FL / GN). `p1` / `p2` for X-Touch Mini (XTM scripts), not LCXL3. Edit **Util** (mode 6) does not use DECK A `*-util` pages.
+   - **NANO** (**group track** remotes): `m1`–`m8` — modes 3 and 11 (slots 1–3 filter, 5–7 sends). `u1`–`u8` — mode 15 EQ-DJ (slots 1–3) and mode 6 Util (slots 5–7: gain, sidechain, width). `pans` — mode 8 Pan (8 parameters). Do not put these tags on NANO’s FX Layer device.
+   - **XTM1**, **XTM2**, **MASCHINE** (**primary device**): `m1`–`m8` (7 parameters each). Filter performance modes: slots 1–3; Sends modes: slots 5–7. **Pan** (mode 8): XTM1/2 use `pans` on the primary device (8 parameters). **EQ-DJ** (mode 15): XTM1/2 use `m1`–`m8` slots 1–3; MASCHINE also uses `u1`–`u8` slots 1–3 on the primary device. **Util** (mode 6): MASCHINE `u1`–`u8` slots 5–7. XTM1 and XTM2 have no util pages. **MASCHINE** `pans` for mode 8 lives on the **group track**, not the primary device.
+   - **Group Control** (mode 7): `eq-gain`, `eq-freq`, `eq-q` on the **last device** on **XTM1**, **XTM2**, **NANO**, and **MASCHINE** (typically **FX Layer**). Bands 1–5 use slots 0–4 on each row. Top row cols **6–8** map to **DECK A** `xtm1-util` / `xtm2-util` / `nano-util` / `maschine-util` parameters **5–7** for the selected group.
 
 Pinned to **DECK A**, **XTM1**, **XTM2**, **MASCHINE**, and **NANO**. Track names matched case-insensitively in the flat track list.
 
@@ -59,28 +59,56 @@ Modes are selected on the LCXL3 by MIDI channel in Custom Mode (**mode number = 
 
 | Mode | LCXL3 name | Notes |
 | --- | --- | --- |
-| 6 | Util | Gain / SC / width on sub-channels |
-| 7 | Parametric EQ | Yes — see below |
-| 8 | Mix | Pan (rest TBD) |
+| 6 | Util | Yes — see below |
+| 7 | Group Control | Yes — see below |
+| 8 | Pan | Yes — see below |
 | 14 | Sends Edit | TBD |
 | 15 | EQ-DJ | Yes — see below |
-| 16 | Master EQ | Same encoder layout as **DECK EQ Cmp** (set 3) |
+| 16 | DECK Master | Yes — see below |
 
 Modes **1** and **2** are unmapped placeholders.
 
 Upload the matching `.syx` from [`../lcxl3/`](../lcxl3/) into each Custom Mode slot (filename prefix = mode number).
 
-### Parametric EQ (edit mode 7)
+### Util (edit mode 6)
 
-**Groups:** **XTM1**, **XTM2**, **NANO**, **MASCHINE** (FX tracks ignored). Tags on the **last device** on that track (FX Layer), not on group **track** remotes for NANO.
+Same group buttons as **EQ-DJ**. Eight columns = `u1`–`u8`. Three rows = remote parameters **5–7** (gain / sidechain / width).
 
-Top row buttons **1–4** select the group (default **1** when you enter the mode). Buttons 5–7 are unused (LEDs off). In Components use **Toggle** with **off** = LED off and **on** colour per group (see `7-Parametric EQ-fix-mom.syx`). The script keeps one button lit by sending CC **127** / **0** on the mode MIDI channel. Encoder ring hues come from the mode **7** `.syx`.
+| Group | Button | Remote host | Pages |
+| --- | --- | --- | --- |
+| XTM1 | 1 | — | Disabled. Button stays off. Encoder LEDs stay off |
+| XTM2 | 2 | — | Disabled. Button stays off. Encoder LEDs stay off |
+| NANO | 3 | Group track | `u1`–`u8` slots 5–7 |
+| MASCHINE | 4 | Primary device | `u1`–`u8` slots 5–7 |
+
+Entering the mode selects **NANO** (button 3). Top buttons **5–8** and the bottom row are unused (script turns them back off).
+
+**`.syx`:** encoder rows **GN / SC / ST**; ring colours **red / orange / yellow** by row. Button block matches EQ-DJ (Toggle, colour off).
+
+### Group Control (edit mode 7)
+
+**Groups:** **XTM1**, **XTM2**, **NANO**, **MASCHINE** (FX tracks ignored). Parametric EQ tags on the **last device** on that track (FX Layer), not on group **track** remotes for NANO.
+
+Top row buttons **1–4** select the group (default **1** when you enter the mode). Same toggle LED behaviour as **Util** and **EQ-DJ**. Buttons **5–8** and the bottom row are unused (script turns them back off).
 
 | Row | Cols 1–5 | Cols 6–8 |
 | --- | --- | --- |
-| Top | `eq-gain` bands 1–5 (G1–G5) | LEDs off |
-| Middle | `eq-freq` bands 1–5 (F1–F5) | LEDs off |
-| Bottom | `eq-q` bands 1–5 (Q1–Q5) | LEDs off |
+| Top | `eq-gain` bands 1–5 (G1–G5) | DECK A `*-util` params **5–7** (GN / SC / ST) for selected group |
+| Middle | `eq-freq` bands 1–5 (F1–F5) | unused |
+| Bottom | `eq-q` bands 1–5 (Q1–Q5) | unused |
+
+### Pan (edit mode 8)
+
+**Groups:** **XTM1**, **XTM2**, **NANO**, **MASCHINE**. Eight columns = remote parameters **1–8** on one page tagged `pans` (top row only; middle and bottom encoder LEDs stay off).
+
+| Group | Remote host | Page tag |
+| --- | --- | --- |
+| XTM1, XTM2 | Primary device | `pans` |
+| NANO, MASCHINE | Group track | `pans` |
+
+**Buttons:** top row **1–4** = group (default **1** on enter, one LED). Bottom row and top buttons **5–8** are unused (script turns them back off).
+
+**`.syx`:** encoder row **P1…P8**; ring colour **orange** on the top row only.
 
 ### EQ-DJ (edit mode 15)
 
@@ -96,15 +124,17 @@ Top row buttons **1–4** select the group (default **1** when you enter the mod
 
 **`.syx`:** encoder rows **Lo / Mid / Hi**; ring colours **red / green / white** by row.
 
-### Master EQ (edit mode 16) — layout reference
+### DECK Master (edit mode 16)
 
-Same as former **Mode 8 — DECK EQ + comp**. Columns 1–5: `eq-gain`, `eq-freq`, `eq-q`. Columns 6–8 top/middle: `comp`. Bottom row cols 6–8: `sc` (RS, FL, GN). Not wired in the deck script yet.
+**DECK A** track remotes (set 3). No LCXL3 buttons. Assignable buttons stay off; script turns any stray toggle back off.
+
+Same encoder layout as former **Mode 8 — DECK EQ + comp**.
 
 | Row | Cols 1–5 | Cols 6–8 |
 | --- | --- | --- |
 | Top | `eq-gain` 1–5 | `comp` 1–3 |
 | Middle | `eq-freq` 1–5 | `comp` 4–6 |
-| Bottom | `eq-q` 1–5 | `sc` 1–3 (RS, FL, GN) |
+| Bottom | `eq-q` 1–5 | `sidechain` slots **1–3** (RS, FL, GN) |
 
 ### Faders (all modes)
 

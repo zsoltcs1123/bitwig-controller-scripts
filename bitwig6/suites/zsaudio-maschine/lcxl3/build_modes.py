@@ -25,7 +25,7 @@ MODE8_EQ_COMP_EQ_BANDS = [7, 15, 19, 43, 116]
 # Mode 7 encoder cols 1–5 (Components export `7-Parametric EQ-fix.syx`).
 MODE7_PARAMETRIC_EQ_BANDS = [5, 17, 25, 29, 3]
 MODE8_EQ_COMP_COMP = 82
-MODE8_EQ_COMP_SC = 9  # vibrant orange — bottom row cols 6–8 (`sc`)
+MODE8_EQ_COMP_SC = 9  # vibrant orange — bottom row cols 6–8 (sidechain)
 
 TRACK_IDENTITY = {
     "XTM1": 5,
@@ -34,7 +34,7 @@ TRACK_IDENTITY = {
     "MASCHINE": 53,
 }
 
-# DECK Util (mode 10): one hue per encoder row (all columns).
+# Util (mode 6): one hue per encoder row (all columns). Gain / sidechain / width.
 DECK_UTIL_ROW_COLOURS = [5, 9, 13]  # vibrant red, orange, yellow (bright)
 
 # Performance modes: top button row 1–8 (`0x30`–`0x37`), bottom row 9–16 (`0x38`–`0x3f`).
@@ -51,6 +51,8 @@ PARAMETRIC_EQ_GROUP_BUTTON_COLOURS = [
 
 # EQ-DJ (mode 15): Lo / Mid / Hi rows — vibrant red, green, white.
 EQ_DJ_ROW_COLOURS = [5, 19, 3]
+# Pan (mode 8): top row only — vibrant orange; rows 2–3 off.
+PAN_ENCODER_ORANGE = 9
 
 
 def syx_filename(mode: int, title: str) -> str:
@@ -235,12 +237,14 @@ def apply_row_colours(msg0: bytearray, row_colours: list[int]) -> None:
             set_encoder_colour(msg0, cid, row_colours[row])
 
 
-def apply_mode7_parametric_eq_colours(msg0: bytearray) -> None:
+def apply_mode7_group_control_colours(msg0: bytearray) -> None:
     for row in range(3):
         for col in range(8):
             cid = 0x10 + row * 8 + col
             if col < 5:
                 set_encoder_colour(msg0, cid, MODE7_PARAMETRIC_EQ_BANDS[col])
+            elif row == 0:
+                set_encoder_colour(msg0, cid, DECK_UTIL_ROW_COLOURS[col - 5])
             else:
                 set_encoder_colour(msg0, cid, LED_PALETTE_OFF)
 
@@ -400,6 +404,19 @@ def rows_low_mid_high() -> list[list[bytes | None]]:
     return [[b"Lo "] * 8, [b"Mid"] * 8, [b"Hi "] * 8]
 
 
+def rows_p1_p8() -> list[list[bytes | None]]:
+    top = [f"P{n} ".encode("ascii") for n in range(1, 9)]
+    return [top, [None] * 8, [None] * 8]
+
+
+def apply_pan_colours(msg0: bytearray) -> None:
+    for col in range(8):
+        set_encoder_colour(msg0, 0x10 + col, PAN_ENCODER_ORANGE)
+    for row in range(1, 3):
+        for col in range(8):
+            set_encoder_colour(msg0, 0x10 + row * 8 + col, LED_PALETTE_OFF)
+
+
 def rows_m1_m2_m3() -> list[list[bytes | None]]:
     return [[b"M1 "] * 8, [b"M2 "] * 8, [b"M3 "] * 8]
 
@@ -412,14 +429,18 @@ def rows_fx_sends() -> list[list[bytes | None]]:
     return [[b"FX1"] * 8, [b"FX2"] * 8, [b"FX3"] * 8]
 
 
-def rows_parametric_eq() -> list[list[bytes | None]]:
+def rows_group_control() -> list[list[bytes | None]]:
+    util_top = [b"GN ", b"SC ", b"ST "]
     rows: list[list[bytes | None]] = []
     for row in range(3):
         line: list[bytes | None] = []
         for col in range(8):
             n = col + 1
             if row == 0:
-                line.append(f"G{n} ".encode("ascii"))
+                if col < 5:
+                    line.append(f"G{n} ".encode("ascii"))
+                else:
+                    line.append(util_top[col - 5])
             elif row == 1:
                 line.append(f"F{n} ".encode("ascii"))
             else:
@@ -472,7 +493,7 @@ def write_mode(
         apply_performance_buttons(msg1, custom_mode)
     elif custom_mode == 7:
         apply_parametric_eq_buttons(msg1, custom_mode)
-    elif custom_mode == 15:
+    elif custom_mode in (6, 8, 15):
         apply_eq_dj_buttons(msg1, custom_mode)
     else:
         apply_button_midi_channels(msg1, custom_mode)
@@ -514,8 +535,8 @@ def main() -> None:
     w(4, "MASCHINE Filter", lambda m: apply_uniform_colour(m, TRACK_IDENTITY["MASCHINE"]), rows_low_mid_high())
     w(5, "DECK Filter", lambda m: apply_column_colours(m, CHANNEL_IDENTITY), rows_hpf_lpf_res())
     w(6, "Util", lambda m: apply_row_colours(m, DECK_UTIL_ROW_COLOURS), rows_gn_sc_st())
-    w(7, "Parametric EQ", apply_mode7_parametric_eq_colours, rows_parametric_eq())
-    w(8, "Mix", grey, rows_blank())
+    w(7, "Group Control", apply_mode7_group_control_colours, rows_group_control())
+    w(8, "Pan", apply_pan_colours, rows_p1_p8())
     w(9, "XTM1 Sends", lambda m: apply_uniform_colour(m, TRACK_IDENTITY["XTM1"]), rows_fx_sends())
     w(10, "XTM2 Sends", lambda m: apply_uniform_colour(m, TRACK_IDENTITY["XTM2"]), rows_fx_sends())
     w(11, "NANO Sends", lambda m: apply_uniform_colour(m, TRACK_IDENTITY["NANO"]), rows_fx_sends())
@@ -523,7 +544,7 @@ def main() -> None:
     w(13, "DECK Sends", lambda m: apply_column_colours(m, CHANNEL_IDENTITY), rows_fx_sends())
     w(14, "Sends Edit", grey, rows_blank())
     w(15, "EQ-DJ", lambda m: apply_row_colours(m, EQ_DJ_ROW_COLOURS), rows_low_mid_high())
-    w(16, "Master EQ", apply_mode8_eq_comp_colours, rows_mode8_eq_comp())
+    w(16, "DECK Master", apply_mode8_eq_comp_colours, rows_mode8_eq_comp())
 
     remove_stale_syx(written)
 

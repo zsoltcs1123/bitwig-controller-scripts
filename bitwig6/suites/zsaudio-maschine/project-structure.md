@@ -47,10 +47,11 @@ Scripts match pages by **tag** (Bitwig remote page tag), not by page display nam
 | **Track** remotes on the group | `faders` | LCXL3 physical faders (DECK A); nanoKONTROL2 faders (NANO) |
 | **Track** remotes | `vols` | nanoKONTROL2 knobs (NANO) |
 | **Track** remotes | `m1`–`m8` | LCXL3 NANO filter/sends (modes 3, 11) only on **NANO** |
-| **Track** remotes | `u1`–`u8` | LCXL3 EQ-DJ on **NANO** (mode 15) |
-| **Track** remotes | `xtm1-mix`, `xtm2-mix`, `nano-mix`, `maschine-mix`, `fx1-mix`–`fx3-mix`, `master-mix`, `*-util`, `eq-gain`, `eq-freq`, `eq-q`, `comp`, `sc` | LCXL3 on **DECK A** (see deck README) |
+| **Track** remotes | `u1`–`u8` | LCXL3 EQ-DJ (mode 15, slots 1–3) and Util (mode 6, slots 5–7) on **NANO** |
+| **Track** remotes | `pans` | LCXL3 Pan (mode 8) on **NANO** and **MASCHINE** group tracks (8 parameters) |
+| **Track** remotes | `xtm1-mix`, `xtm2-mix`, `nano-mix`, `maschine-mix`, `fx1-mix`–`fx3-mix`, `master-mix`, `*-util`, `eq-gain`, `eq-freq`, `eq-q`, `comp`, `sidechain` | LCXL3 on **DECK A** (see deck README) |
 | **Track** remotes | `p1`, `p2` | X-Touch Mini encoders 1–3 on **DECK A** (XTM1 / XTM2 scripts) |
-| **Last device** on the group (usually **FX Layer**: Channel Strip Group, Channel Strip FX, or Channel Strip Deck) | `eq-gain`, `eq-freq`, `eq-q` | LCXL3 Parametric EQ (mode 7) for **NANO** |
+| **Last device** on the group (usually **FX Layer**: Channel Strip Group, Channel Strip FX, or Channel Strip Deck) | `eq-gain`, `eq-freq`, `eq-q` | LCXL3 Group Control (mode 7) for **NANO** |
 
 Do **not** put `m1`–`m8`, `u1`–`u8`, `faders`, or `vols` on a group’s **FX Layer** device if a script expects **track** remotes (nano + deck).
 
@@ -59,9 +60,10 @@ Do **not** put `m1`–`m8`, `u1`–`u8`, `faders`, or `vols` on a group’s **FX
 | Host | Tags | Used for |
 | --- | --- | --- |
 | **Primary device** (Instrument Selector or Drum Machine) | `m0`, `mutes`, `kill`, `faders`, `vols`, `d1`–`d8`, `m1`–`m8` | X-Touch Mini; LCXL3 filter/sends/EQ-DJ on XTM/MASCHINE |
-| **Primary device** | `u1`–`u8` | LCXL3 EQ-DJ on **MASCHINE** (mode 15) |
+| **Primary device** | `pans` | LCXL3 Pan (mode 8) on **XTM1** and **XTM2** (8 parameters) |
+| **Primary device** | `u1`–`u8` | LCXL3 EQ-DJ (mode 15, slots 1–3) and Util (mode 6, slots 5–7) on **MASCHINE** |
 | **Track** remotes | `chainkill` | X-Touch Mini chain kill (XTM1 / XTM2) |
-| **Last device** on the track (**FX Layer**) | `eq-gain`, `eq-freq`, `eq-q` | LCXL3 Parametric EQ (mode 7) |
+| **Last device** on the track (**FX Layer**) | `eq-gain`, `eq-freq`, `eq-q` | LCXL3 Group Control (mode 7) |
 
 ### Effect tracks (`FX1`–`FX3`, `Premaster`, …)
 
@@ -121,7 +123,7 @@ Same layout on both tracks:
 
 Clips launch on the **instrument track only** (not scene launch, not the parent group).
 
-**Remote controls:** Instrument Selector tags (`kill`, `m0`, `mutes`, `faders`, `vols`, `d1`–`d8`, …). Track `chainkill` (slots 1–8). Parametric EQ on **last device** (`eq-gain`, `eq-freq`, `eq-q`). Details: `zsaudio-maschine-xtm1` / `xtm2` READMEs.
+**Remote controls:** Instrument Selector tags (`kill`, `m0`, `mutes`, `faders`, `vols`, `d1`–`d8`, …). Track `chainkill` (slots 1–8). Group Control parametric EQ on **last device** (`eq-gain`, `eq-freq`, `eq-q`). Details: `zsaudio-maschine-xtm1` / `xtm2` READMEs.
 
 ## NANO
 
@@ -129,7 +131,7 @@ Clips launch on the **instrument track only** (not scene launch, not the parent 
 
 **Group track** remotes: `faders`, `vols` (nano script); `m1`–`m8`, `u1`–`u8` (deck LCXL3).
 
-**Parametric EQ** (mode 7): `eq-gain`, `eq-freq`, `eq-q` on **last device** (FX Layer) on the **NANO** group track.
+**Group Control** (mode 7): `eq-gain`, `eq-freq`, `eq-q` on **last device** (FX Layer) on the **NANO** group track; DECK A `nano-util` params **5–7** on top row cols **6–8** when NANO is selected.
 
 Clip launcher grid and scenes: `zsaudio-maschine-nano` README.
 

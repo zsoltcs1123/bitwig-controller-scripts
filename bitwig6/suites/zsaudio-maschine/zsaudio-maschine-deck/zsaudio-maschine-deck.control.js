@@ -38,10 +38,11 @@ var DECK_UTIL_TAGS = [
     "xtm1-util", "xtm2-util", "nano-util", "maschine-util",
     "fx1-util", "fx2-util", "fx3-util", "master-util",
 ];
-var DECK_SET3_TAGS = ["eq-gain", "eq-freq", "eq-q", "comp", "sc"];
+var DECK_SET3_TAGS = ["eq-gain", "eq-freq", "eq-q", "comp", "sidechain"];
+var DECK_SET3_SIDECHAIN_INDEX = 4;
 var DECK_EQ_COMP_EQ_PARAMS = 5;
 var DECK_EQ_COMP_COMP_PARAMS = 6;
-var DECK_EQ_COMP_SC_PARAMS = 3;
+var DECK_EQ_COMP_SIDECHAIN_PARAMS = 3;
 
 var PARAMETRIC_BANDS = 5;
 var PARAMETRIC_GROUP_COUNT = 4;
@@ -50,6 +51,14 @@ var PARAMETRIC_PAGE_TAGS = ["eq-gain", "eq-freq", "eq-q"];
 var EQ_DJ_GROUP_COUNT = 4;
 var EQ_DJ_BANDS = 3;
 var EQ_DJ_PARAM_OFFSET = 0;
+var PANS_TAG = "pans";
+var PAN_PARAMS = 8;
+var PAN_ROWS = 1;
+var UTIL_GROUP_COUNT = 4;
+var UTIL_ROWS = 3;
+// Remote slots 5–7: gain, sidechain, width. XTM1 and XTM2 have no util pages.
+var UTIL_PARAM_OFFSET = 4;
+var UTIL_DEFAULT_GROUP = 2;
 // Toggle press latches that button. CC 0 does not release it.
 // One CC 127 on that button's MIDI channel does. Do not send it on every channel.
 var LCXL3_BUTTON_LED_ON = 127;
@@ -59,17 +68,19 @@ var LCXL3_BUTTON_LED_OFF = 0;
 var CH_NANO_FILTER = 2;       // 3 — NANO Filter (perf)
 var CH_MACHINE_FILTER = 3;    // 4 — MASCHINE Filter (perf)
 var CH_DECK_FILTER = 4;       // 5 — DECK Filter (perf)
-var CH_PARAMETRIC_EQ = 6;     // 7 — Parametric EQ (edit)
+var CH_UTIL = 5;              // 6 — Util (edit)
+var CH_GROUP_CONTROL = 6;     // 7 — Group Control (edit)
+var CH_PAN = 7;               // 8 — Pan (edit)
 var CH_DECK_SENDS = 12;       // 13 — DECK Sends (perf)
 var CH_EQ_DJ = 14;            // 15 — EQ-DJ (edit)
-var CH_MASTER_EQ = 15;        // 16 — Master EQ (edit; script later)
+var CH_DECK_MASTER = 15;        // 16 — DECK Master (edit)
 var CH_XTM1_SENDS = 8;        // 9 — XTM1 Sends (perf)
 var CH_XTM2_SENDS = 9;        // 10 — XTM2 Sends (perf)
 var CH_NANO_SENDS = 10;       // 11 — NANO Sends (perf)
 var CH_MACHINE_SENDS = 11;    // 12 — MASCHINE Sends (perf)
 var CH_UNUSED = -1;
 // Log encoder handling for one LCXL3 mode only, or -1 for every mapped mode.
-var DEBUG_FOCUS_CHANNEL = CH_DECK_FILTER;
+var DEBUG_FOCUS_CHANNEL = CH_DECK_MASTER;
 
 var CC = {
     ENC_ROW_0: 13, ENC_ROW_1: 21, ENC_ROW_2: 29,
@@ -95,12 +106,21 @@ var nanoUPages = [];
 var drumsBindings = [];
 var parametricBindings = [];
 var parametricSelectedGroupIndex = 0;
-var parametricGroupLatched = false;
+var groupControlTopOn = [false, false, false, false, false, false, false, false];
+var groupControlEnterPending = false;
 var machineEqDjUPages = [];
 var eqDjGroupPages = [];
 var eqDjSelectedGroupIndex = 0;
 var eqDjTopOn = [false, false, false, false, false, false, false, false];
 var eqDjEnterPending = false;
+var panGroupPages = [];
+var panSelectedGroupIndex = 0;
+var panTopOn = [false, false, false, false, false, false, false, false];
+var panEnterPending = false;
+var utilGroupPages = [];
+var utilSelectedGroupIndex = UTIL_DEFAULT_GROUP;
+var utilTopOn = [false, false, false, false, false, false, false, false];
+var utilEnterPending = false;
 var lastEncoderMidiChannel = -1;
 var lastEncoderMidiByKey = {};
 var debugOnceKeys = {};
@@ -157,6 +177,8 @@ function init() {
     setupNanoRemotes();
     setupParametricBindings();
     setupEqDjRemotes();
+    setupPanRemotes();
+    setupUtilRemotes();
     setupDetection();
 
     host.scheduleTask(function () {
@@ -230,11 +252,20 @@ function encoderModeLabel(channel) {
     if (channel === CH_MACHINE_FILTER) {
         return "mode 4 MASCHINE Filter";
     }
-    if (channel === CH_PARAMETRIC_EQ) {
-        return "mode 7 Parametric EQ";
+    if (channel === CH_GROUP_CONTROL) {
+        return "mode 7 Group Control";
+    }
+    if (channel === CH_PAN) {
+        return "mode 8 Pan";
     }
     if (channel === CH_EQ_DJ) {
         return "mode 15 EQ-DJ";
+    }
+    if (channel === CH_UTIL) {
+        return "mode 6 Util";
+    }
+    if (channel === CH_DECK_MASTER) {
+        return "mode 16 DECK Master";
     }
     return "MIDI ch " + (channel + 1);
 }
@@ -255,7 +286,49 @@ function describeEncoderParam(mode, column, row, param) {
         var eqDjName = param.exists().get() ? param.name().get() : "(not mapped)";
         return eqDjTag + " lo/mid/hi " + (row + 1) + " — " + eqDjName;
     }
+    if (mode.layout === "pan") {
+        var panLabel = "P" + (column + 1);
+        if (!param) {
+            return panLabel + " (no param handle)";
+        }
+        var panName = param.exists().get() ? param.name().get() : "(not mapped)";
+        return panLabel + " — " + panName;
+    }
+    if (mode.layout === "util") {
+        var utilNames = ["gain", "sidechain", "width"];
+        var utilTag = "u" + (column + 1);
+        if (!param) {
+            return utilTag + " " + utilNames[row] + " (no param handle)";
+        }
+        var utilName = param.exists().get() ? param.name().get() : "(not mapped)";
+        return utilTag + " " + utilNames[row] + " — " + utilName;
+    }
+    if (mode.layout === "deckEqComp") {
+        var deckEqTag = DECK_SET3_TAGS[row] || "?";
+        if (column >= DECK_EQ_COMP_EQ_PARAMS) {
+            if (row === 2) {
+                deckEqTag = DECK_SET3_TAGS[DECK_SET3_SIDECHAIN_INDEX];
+            } else {
+                deckEqTag = "comp";
+            }
+        }
+        if (!param) {
+            return deckEqTag + " col " + (column + 1) + " (no param handle)";
+        }
+        var deckEqName = param.exists().get() ? param.name().get() : "(not mapped)";
+        return deckEqTag + " col " + (column + 1) + " — " + deckEqName;
+    }
     if (mode.layout === "parametricEq") {
+        if (row === 0 && column >= PARAMETRIC_BANDS) {
+            var gcUtilNames = ["gain", "sidechain", "width"];
+            var gcUtilTag = DECK_UTIL_TAGS[parametricSelectedGroupIndex] || "?";
+            var gcUtilIdx = column - PARAMETRIC_BANDS;
+            if (!param) {
+                return gcUtilTag + " " + gcUtilNames[gcUtilIdx] + " (no param handle)";
+            }
+            var gcUtilName = param.exists().get() ? param.name().get() : "(not mapped)";
+            return gcUtilTag + " " + gcUtilNames[gcUtilIdx] + " — " + gcUtilName;
+        }
         var peqTag = PARAMETRIC_PAGE_TAGS[row] || "?";
         if (!param) {
             return peqTag + " band " + (column + 1) + " (no param handle)";
@@ -361,6 +434,33 @@ function setupDeckRemotes() {
         deckSet3Pages[i] = page3;
     }
     setupDeckEqCompEncoderLedObservers();
+    setupGroupControlUtilEncoderLedObservers();
+}
+
+function setupGroupControlUtilEncoderLedObservers() {
+    var group;
+    var utilCol;
+    for (group = 0; group < 4; group++) {
+        var utilPage = deckUtilPages[group];
+        if (!utilPage) {
+            continue;
+        }
+        for (utilCol = 0; utilCol < 3; utilCol++) {
+            (function (groupIndex, column, paramIndex) {
+                var param = utilPage.getParameter(paramIndex);
+                param.value().addValueObserver(function () {
+                    if (groupIndex === parametricSelectedGroupIndex) {
+                        updateParametricEncoderLed(0, column);
+                    }
+                });
+                param.exists().addValueObserver(function () {
+                    if (groupIndex === parametricSelectedGroupIndex) {
+                        updateParametricEncoderLed(0, column);
+                    }
+                });
+            })(group, PARAMETRIC_BANDS + utilCol, UTIL_PARAM_OFFSET + utilCol);
+        }
+    }
 }
 
 function setupNanoRemotes() {
@@ -417,15 +517,15 @@ function resolveDeckEqCompParam(row, column) {
         return eqPage.getParameter(column);
     }
     if (row === 2) {
-        var scPage = deckSet3Pages[4];
-        if (!scPage || column < DECK_EQ_COMP_EQ_PARAMS) {
+        var sidechainPage = deckSet3Pages[DECK_SET3_SIDECHAIN_INDEX];
+        if (!sidechainPage || column < DECK_EQ_COMP_EQ_PARAMS) {
             return null;
         }
-        var scIndex = column - DECK_EQ_COMP_EQ_PARAMS;
-        if (scIndex < 0 || scIndex >= DECK_EQ_COMP_SC_PARAMS) {
+        var sidechainIndex = column - DECK_EQ_COMP_EQ_PARAMS;
+        if (sidechainIndex < 0 || sidechainIndex >= DECK_EQ_COMP_SIDECHAIN_PARAMS) {
             return null;
         }
-        return scPage.getParameter(scIndex);
+        return sidechainPage.getParameter(sidechainIndex);
     }
     var compPage = deckSet3Pages[3];
     if (!compPage) {
@@ -444,7 +544,7 @@ function updateDeckEqCompEncoderLed(row, column) {
     }
     var param = resolveDeckEqCompParam(row, column);
     sendEncoderLed(
-        CH_MASTER_EQ, row, column,
+        CH_DECK_MASTER, row, column,
         paramLedValue(param)
     );
 }
@@ -517,6 +617,17 @@ function isParametricGroupReady() {
     return binding.device.exists().get();
 }
 
+function isGroupControlUtilEncoder(row, column) {
+    return row === 0 && column >= PARAMETRIC_BANDS && column < NUM_COLUMNS;
+}
+
+function isGroupControlEncoderReady(row, column) {
+    if (isGroupControlUtilEncoder(row, column)) {
+        return deckFound;
+    }
+    return isParametricGroupReady();
+}
+
 function setupParametricBindings() {
     parametricBindings = [
         createParametricBinding("XTM1", 0, false),
@@ -581,22 +692,36 @@ function setupParametricEncoderLedObservers(row, page) {
 }
 
 function updateParametricEncoderLed(row, column) {
+    if (isGroupControlUtilEncoder(row, column)) {
+        if (!deckFound) {
+            sendEncoderLed(CH_GROUP_CONTROL, row, column, 0);
+            return;
+        }
+        var utilPage = deckUtilPages[parametricSelectedGroupIndex];
+        if (!utilPage) {
+            sendEncoderLed(CH_GROUP_CONTROL, row, column, 0);
+            return;
+        }
+        var utilParam = utilPage.getParameter(UTIL_PARAM_OFFSET + (column - PARAMETRIC_BANDS));
+        sendEncoderLed(CH_GROUP_CONTROL, row, column, paramLedValue(utilParam));
+        return;
+    }
     if (column >= PARAMETRIC_BANDS) {
-        sendEncoderLed(CH_PARAMETRIC_EQ, row, column, 0);
+        sendEncoderLed(CH_GROUP_CONTROL, row, column, 0);
         return;
     }
     var binding = activeParametricBinding();
     if (!binding || !binding.found || !binding.device.exists().get()) {
-        sendEncoderLed(CH_PARAMETRIC_EQ, row, column, 0);
+        sendEncoderLed(CH_GROUP_CONTROL, row, column, 0);
         return;
     }
     var page = binding.pages[row];
     if (!page) {
-        sendEncoderLed(CH_PARAMETRIC_EQ, row, column, 0);
+        sendEncoderLed(CH_GROUP_CONTROL, row, column, 0);
         return;
     }
     sendEncoderLed(
-        CH_PARAMETRIC_EQ, row, column,
+        CH_GROUP_CONTROL, row, column,
         paramLedValue(page.getParameter(column))
     );
 }
@@ -617,23 +742,53 @@ function releaseLatchedToggle(midiChannel, cc) {
     midiOut.sendMidi(0xB0 + midiChannel, cc, LCXL3_BUTTON_LED_ON);
 }
 
-function handleParametricButton(midiChannel, cc, value) {
-    var slot = cc - CC.BUTTON_FIRST;
-    if (slot < 0 || slot >= PARAMETRIC_GROUP_COUNT || value === 0) {
-        return;
+function groupControlSelectionLabel() {
+    return eqDjGroupTrackName(parametricSelectedGroupIndex);
+}
+
+function groupControlBeginEnter() {
+    var i;
+    parametricSelectedGroupIndex = 0;
+    for (i = 0; i < groupControlTopOn.length; i++) {
+        groupControlTopOn[i] = false;
     }
-    if (slot === parametricSelectedGroupIndex) {
-        parametricGroupLatched = true;
-        return;
-    }
-    if (parametricGroupLatched) {
-        releaseLatchedToggle(midiChannel, CC.BUTTON_FIRST + parametricSelectedGroupIndex);
-    }
-    parametricSelectedGroupIndex = slot;
-    parametricGroupLatched = true;
-    clearEncoderMidiHistoryForChannel(CH_PARAMETRIC_EQ);
+    groupControlEnterPending = true;
     refreshParametricEncoderLeds();
-    status("parametric eq — " + parametricBindings[slot].trackName);
+}
+
+function groupControlFinishEnter(midiChannel) {
+    if (!groupControlEnterPending) {
+        return;
+    }
+    groupControlEnterPending = false;
+    eqDjLightIfDark(midiChannel, groupControlTopOn, parametricSelectedGroupIndex, CC.BUTTON_FIRST);
+    status("group control — " + groupControlSelectionLabel());
+}
+
+function groupControlNoteSelectionChange(changed) {
+    if (!changed) {
+        return;
+    }
+    clearEncoderMidiHistoryForChannel(CH_GROUP_CONTROL);
+    refreshParametricEncoderLeds();
+    if (!groupControlEnterPending) {
+        status("group control — " + groupControlSelectionLabel());
+    }
+}
+
+function handleGroupControlButton(midiChannel, cc, value) {
+    var top = eqDjTopButtonIndex(cc);
+    if (top < 0 || top >= PARAMETRIC_GROUP_COUNT) {
+        if (value !== 0) {
+            releaseLatchedToggle(midiChannel, cc);
+        }
+        return;
+    }
+    groupControlNoteSelectionChange(eqDjApplySelector(
+        midiChannel, top, value, groupControlTopOn, PARAMETRIC_GROUP_COUNT, CC.BUTTON_FIRST,
+        function () { return parametricSelectedGroupIndex; },
+        function (index) { parametricSelectedGroupIndex = index; }
+    ));
 }
 
 function eqDjChannelTag(groupIndex, channelIndex) {
@@ -846,6 +1001,263 @@ function handleEqDjButton(midiChannel, cc, value) {
     ));
 }
 
+function createPanRemotePage(remoteHost, idPrefix) {
+    var page = remoteHost.createCursorRemoteControlsPage(
+        idPrefix + PANS_TAG, PAN_PARAMS, PANS_TAG
+    );
+    markPageParams(page, PAN_PARAMS);
+    return page;
+}
+
+function isPanGroupReady() {
+    return eqDjGroupFound(panSelectedGroupIndex);
+}
+
+function activePanPage() {
+    return panGroupPages[panSelectedGroupIndex];
+}
+
+function setupPanRemotes() {
+    panGroupPages = [
+        createPanRemotePage(drumsBindings[0].device, "xtm1-pans-"),
+        createPanRemotePage(drumsBindings[1].device, "xtm2-pans-"),
+        createPanRemotePage(cursorNanoTrack, "nano-pans-"),
+        createPanRemotePage(drumsBindings[2].cursor, "machine-pans-"),
+    ];
+    setupPanEncoderLedObservers();
+}
+
+function setupPanEncoderLedObservers() {
+    var group;
+    var col;
+    for (group = 0; group < panGroupPages.length; group++) {
+        var page = panGroupPages[group];
+        if (!page) {
+            continue;
+        }
+        for (col = 0; col < NUM_COLUMNS; col++) {
+            (function (column, grp) {
+                var param = page.getParameter(column);
+                param.value().addValueObserver(function () {
+                    if (grp === panSelectedGroupIndex) {
+                        updatePanEncoderLed(0, column);
+                    }
+                });
+                param.exists().addValueObserver(function () {
+                    if (grp === panSelectedGroupIndex) {
+                        updatePanEncoderLed(0, column);
+                    }
+                });
+            })(col, group);
+        }
+    }
+}
+
+function updatePanEncoderLed(row, column) {
+    if (row >= PAN_ROWS) {
+        sendEncoderLed(CH_PAN, row, column, 0);
+        return;
+    }
+    if (!isPanGroupReady()) {
+        sendEncoderLed(CH_PAN, row, column, 0);
+        return;
+    }
+    var page = activePanPage();
+    if (!page) {
+        sendEncoderLed(CH_PAN, row, column, 0);
+        return;
+    }
+    var param = page.getParameter(column);
+    sendEncoderLed(CH_PAN, row, column, paramLedValue(param));
+}
+
+function refreshPanEncoderLeds() {
+    var row;
+    var col;
+    for (row = 0; row < NUM_ROWS; row++) {
+        for (col = 0; col < NUM_COLUMNS; col++) {
+            updatePanEncoderLed(row, col);
+        }
+    }
+}
+
+function panBeginEnter() {
+    var i;
+    panSelectedGroupIndex = 0;
+    for (i = 0; i < NUM_COLUMNS; i++) {
+        panTopOn[i] = false;
+    }
+    panEnterPending = true;
+    refreshPanEncoderLeds();
+}
+
+function panFinishEnter(midiChannel) {
+    if (!panEnterPending) {
+        return;
+    }
+    panEnterPending = false;
+    eqDjLightIfDark(midiChannel, panTopOn, panSelectedGroupIndex, CC.BUTTON_FIRST);
+    status("pan — " + eqDjGroupTrackName(panSelectedGroupIndex));
+}
+
+function panNoteSelectionChange(changed) {
+    if (!changed) {
+        return;
+    }
+    clearEncoderMidiHistoryForChannel(CH_PAN);
+    refreshPanEncoderLeds();
+    if (!panEnterPending) {
+        status("pan — " + eqDjGroupTrackName(panSelectedGroupIndex));
+    }
+}
+
+function handlePanButton(midiChannel, cc, value) {
+    var top = eqDjTopButtonIndex(cc);
+    if (top < 0 || top >= EQ_DJ_GROUP_COUNT) {
+        if (value !== 0) {
+            releaseLatchedToggle(midiChannel, cc);
+        }
+        return;
+    }
+    panNoteSelectionChange(eqDjApplySelector(
+        midiChannel, top, value, panTopOn, EQ_DJ_GROUP_COUNT, CC.BUTTON_FIRST,
+        function () { return panSelectedGroupIndex; },
+        function (index) { panSelectedGroupIndex = index; }
+    ));
+}
+
+function utilGroupEnabled(groupIndex) {
+    return groupIndex === 2 || groupIndex === 3;
+}
+
+function utilSelectionLabel() {
+    return eqDjGroupTrackName(utilSelectedGroupIndex);
+}
+
+function isUtilGroupReady() {
+    if (!utilGroupEnabled(utilSelectedGroupIndex)) {
+        return false;
+    }
+    return eqDjGroupFound(utilSelectedGroupIndex);
+}
+
+function activeUtilPages() {
+    return utilGroupPages[utilSelectedGroupIndex];
+}
+
+function setupUtilRemotes() {
+    utilGroupPages = [
+        null,
+        null,
+        nanoUPages,
+        machineEqDjUPages,
+    ];
+    setupUtilEncoderLedObservers();
+}
+
+function setupUtilEncoderLedObservers() {
+    var group;
+    var col;
+    var row;
+    for (group = 0; group < utilGroupPages.length; group++) {
+        var pages = utilGroupPages[group];
+        if (!pages) {
+            continue;
+        }
+        for (col = 0; col < NUM_COLUMNS; col++) {
+            var page = pages[col];
+            if (!page) {
+                continue;
+            }
+            for (row = 0; row < UTIL_ROWS; row++) {
+                (function (encoderRow, column, grp) {
+                    var param = page.getParameter(UTIL_PARAM_OFFSET + encoderRow);
+                    param.value().addValueObserver(function () {
+                        if (grp === utilSelectedGroupIndex) {
+                            updateUtilEncoderLed(encoderRow, column);
+                        }
+                    });
+                    param.exists().addValueObserver(function () {
+                        if (grp === utilSelectedGroupIndex) {
+                            updateUtilEncoderLed(encoderRow, column);
+                        }
+                    });
+                })(row, col, group);
+            }
+        }
+    }
+}
+
+function updateUtilEncoderLed(row, column) {
+    if (row >= UTIL_ROWS || !isUtilGroupReady()) {
+        sendEncoderLed(CH_UTIL, row, column, 0);
+        return;
+    }
+    var pages = activeUtilPages();
+    var page = pages && pages[column];
+    if (!page) {
+        sendEncoderLed(CH_UTIL, row, column, 0);
+        return;
+    }
+    var param = page.getParameter(UTIL_PARAM_OFFSET + row);
+    sendEncoderLed(CH_UTIL, row, column, paramLedValue(param));
+}
+
+function refreshUtilEncoderLeds() {
+    var row;
+    var col;
+    for (row = 0; row < NUM_ROWS; row++) {
+        for (col = 0; col < NUM_COLUMNS; col++) {
+            updateUtilEncoderLed(row, col);
+        }
+    }
+}
+
+function utilBeginEnter() {
+    var i;
+    utilSelectedGroupIndex = UTIL_DEFAULT_GROUP;
+    for (i = 0; i < NUM_COLUMNS; i++) {
+        utilTopOn[i] = false;
+    }
+    utilEnterPending = true;
+    refreshUtilEncoderLeds();
+}
+
+function utilFinishEnter(midiChannel) {
+    if (!utilEnterPending) {
+        return;
+    }
+    utilEnterPending = false;
+    eqDjLightIfDark(midiChannel, utilTopOn, utilSelectedGroupIndex, CC.BUTTON_FIRST);
+    status("util — " + utilSelectionLabel());
+}
+
+function utilNoteSelectionChange(changed) {
+    if (!changed) {
+        return;
+    }
+    clearEncoderMidiHistoryForChannel(CH_UTIL);
+    refreshUtilEncoderLeds();
+    if (!utilEnterPending) {
+        status("util — " + utilSelectionLabel());
+    }
+}
+
+function handleUtilButton(midiChannel, cc, value) {
+    var top = eqDjTopButtonIndex(cc);
+    if (top < 0 || top >= UTIL_GROUP_COUNT || !utilGroupEnabled(top)) {
+        if (value !== 0) {
+            releaseLatchedToggle(midiChannel, cc);
+        }
+        return;
+    }
+    utilNoteSelectionChange(eqDjApplySelector(
+        midiChannel, top, value, utilTopOn, UTIL_GROUP_COUNT, CC.BUTTON_FIRST,
+        function () { return utilSelectedGroupIndex; },
+        function (index) { utilSelectedGroupIndex = index; }
+    ));
+}
+
 function buildColumnarTags(prefix) {
     var tags = [];
     for (var i = 0; i < NUM_COLUMNS; i++) {
@@ -956,6 +1368,14 @@ function refreshChannelEncoderLeds(channel) {
         refreshEqDjEncoderLeds();
         return;
     }
+    if (mode.layout === "pan") {
+        refreshPanEncoderLeds();
+        return;
+    }
+    if (mode.layout === "util") {
+        refreshUtilEncoderLeds();
+        return;
+    }
     var col;
     var row;
     for (col = 0; col < NUM_COLUMNS; col++) {
@@ -985,6 +1405,8 @@ function refreshAllEncoderLeds() {
     refreshDeckEqCompEncoderLeds();
     refreshParametricEncoderLeds();
     refreshEqDjEncoderLeds();
+    refreshPanEncoderLeds();
+    refreshUtilEncoderLeds();
 }
 
 function encoderModeForChannel(channel) {
@@ -1041,7 +1463,7 @@ function encoderModeForChannel(channel) {
             trackReady: deckFound,
         };
     }
-    if (channel === CH_PARAMETRIC_EQ) {
+    if (channel === CH_GROUP_CONTROL) {
         return {
             layout: "parametricEq",
             trackReady: isParametricGroupReady(),
@@ -1051,6 +1473,24 @@ function encoderModeForChannel(channel) {
         return {
             layout: "eqDj",
             trackReady: isEqDjGroupReady(),
+        };
+    }
+    if (channel === CH_PAN) {
+        return {
+            layout: "pan",
+            trackReady: isPanGroupReady(),
+        };
+    }
+    if (channel === CH_UTIL) {
+        return {
+            layout: "util",
+            trackReady: isUtilGroupReady(),
+        };
+    }
+    if (channel === CH_DECK_MASTER) {
+        return {
+            layout: "deckEqComp",
+            trackReady: deckFound,
         };
     }
     return null;
@@ -1147,6 +1587,8 @@ function resolveTargetTracks(forceLog) {
     }
     refreshParametricEncoderLeds();
     refreshEqDjEncoderLeds();
+    refreshPanEncoderLeds();
+    refreshUtilEncoderLeds();
 }
 
 function onMidi(status, data1, data2) {
@@ -1205,16 +1647,34 @@ function handleCC(channel, cc, value) {
 
     if (cc >= CC.BUTTON_FIRST && cc <= CC.BUTTON_LAST) {
         if (mode.layout === "parametricEq") {
-            handleParametricButton(channel, cc, value);
+            handleGroupControlButton(channel, cc, value);
+            groupControlFinishEnter(channel);
         } else if (mode.layout === "eqDj") {
             handleEqDjButton(channel, cc, value);
             eqDjFinishEnter(channel);
+        } else if (mode.layout === "pan") {
+            handlePanButton(channel, cc, value);
+            panFinishEnter(channel);
+        } else if (mode.layout === "util") {
+            handleUtilButton(channel, cc, value);
+            utilFinishEnter(channel);
+        } else if (mode.layout === "deckEqComp" && value !== 0) {
+            releaseLatchedToggle(channel, cc);
         }
         return;
     }
 
+    if (mode.layout === "parametricEq") {
+        groupControlFinishEnter(channel);
+    }
     if (mode.layout === "eqDj") {
         eqDjFinishEnter(channel);
+    }
+    if (mode.layout === "pan") {
+        panFinishEnter(channel);
+    }
+    if (mode.layout === "util") {
+        utilFinishEnter(channel);
     }
 
     var row = encoderRowFromCC(cc);
@@ -1261,13 +1721,17 @@ function onEncoderMidiChannelChange(previousChannel, channel) {
     if (encoderModeForChannel(channel)) {
         clearEncoderMidiHistoryForChannel(channel);
     }
-    if (channel === CH_PARAMETRIC_EQ) {
-        parametricSelectedGroupIndex = 0;
-        parametricGroupLatched = false;
-        refreshParametricEncoderLeds();
+    if (channel === CH_GROUP_CONTROL) {
+        groupControlBeginEnter();
     }
     if (channel === CH_EQ_DJ) {
         eqDjBeginEnter();
+    }
+    if (channel === CH_PAN) {
+        panBeginEnter();
+    }
+    if (channel === CH_UTIL) {
+        utilBeginEnter();
     }
 }
 
@@ -1276,6 +1740,16 @@ function resolveEncoderParam(mode, column, row) {
         return resolveDeckEqCompParam(row, column);
     }
     if (mode.layout === "parametricEq") {
+        if (row === 0 && column >= PARAMETRIC_BANDS && column < NUM_COLUMNS) {
+            if (!deckFound) {
+                return null;
+            }
+            var groupUtilPage = deckUtilPages[parametricSelectedGroupIndex];
+            if (!groupUtilPage) {
+                return null;
+            }
+            return groupUtilPage.getParameter(UTIL_PARAM_OFFSET + (column - PARAMETRIC_BANDS));
+        }
         if (column >= PARAMETRIC_BANDS) {
             return null;
         }
@@ -1295,6 +1769,26 @@ function resolveEncoderParam(mode, column, row) {
         }
         return eqDjPages[column].getParameter(EQ_DJ_PARAM_OFFSET + row);
     }
+    if (mode.layout === "pan") {
+        if (row >= PAN_ROWS) {
+            return null;
+        }
+        var panPage = activePanPage();
+        if (!panPage) {
+            return null;
+        }
+        return panPage.getParameter(column);
+    }
+    if (mode.layout === "util") {
+        if (row >= UTIL_ROWS || !utilGroupEnabled(utilSelectedGroupIndex)) {
+            return null;
+        }
+        var utilPages = activeUtilPages();
+        if (!utilPages || !utilPages[column]) {
+            return null;
+        }
+        return utilPages[column].getParameter(UTIL_PARAM_OFFSET + row);
+    }
     var page = mode.pages[column];
     if (!page) {
         return null;
@@ -1312,10 +1806,18 @@ function encoderDelta(previousMidi, midiValue) {
     return delta;
 }
 
+function encoderTargetReady(mode, row, column) {
+    if (mode.layout === "parametricEq") {
+        return isGroupControlEncoderReady(row, column);
+    }
+    return mode.trackReady;
+}
+
 function applyEncoderMidi(channel, row, column, cc, midiValue, mode) {
-    if (!mode.trackReady) {
-        logOnce("track-not-ready-ch-" + channel,
-            encoderModeLabel(channel) + " — track not ready (is DECK A found?)");
+    if (!encoderTargetReady(mode, row, column)) {
+        logOnce("track-not-ready-ch-" + channel + "-c" + column + "-r" + row,
+            encoderModeLabel(channel) + " — target not ready for col " + (column + 1) +
+            " row " + (row + 1));
         return;
     }
     var param = resolveEncoderParam(mode, column, row);

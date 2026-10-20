@@ -26,12 +26,12 @@ Modes **1** and **2** are reserved/unmapped (grey `.syx`, no deck script).
 
 | Mode | LCXL3 name | Notes | LCXL3 buttons | Deck script |
 | --- | --- | --- | --- | --- |
-| 6 | Util | Gain / sidechain / width on sub-channels | Same indirection as EQ-DJ | Later |
-| 7 | Parametric EQ | 5-band on **XTM1**, **XTM2**, **NANO**, **MASCHINE** (last device: `eq-gain`, `eq-freq`, `eq-q`) | Buttons 1–4: group select (identity colours; default 1 on enter) | Yes |
-| 8 | Mix | Pan (rest TBD) | Same indirection as EQ-DJ | Later |
+| 6 | Util | Gain / sidechain / width on **NANO** and **MASCHINE** `u1`–`u8` (params 5–7). **XTM1** and **XTM2** have no util pages: those group buttons stay off, encoder LEDs stay off | Top **1–4**: group (default **3** / NANO). Buttons **1–2** disabled. Bottom row unused | Yes |
+| 7 | Group Control | 5-band parametric EQ on **XTM1**, **XTM2**, **NANO**, **MASCHINE** (last device: `eq-gain`, `eq-freq`, `eq-q`). Top row cols **6–8**: DECK A `*-util` params **5–7** for the selected group | Top **1–4**: group (default **1**). Same LED logic as Util / EQ-DJ. Buttons **5–8** and bottom row unused | Yes |
+| 8 | Pan | `pans` page: XTM1/2 primary device; NANO/MASCHINE group track. Top row encoders 1–8 → params 1–8 | Top **1–4**: group (default **1**). Bottom row unused | Yes |
 | 14 | Sends Edit | TBD | TBD | Later |
 | 15 | EQ-DJ | 3-band per sub-channel: XTM1/2 `m1`–`m8` device; NANO `u1`–`u8` track; MASCHINE `u1`–`u8` device (params 1–3). Columns 1–8 = those pages | Top **1–4**: group (default 1). Bottom row unused | Yes |
-| 16 | Master EQ | Same layout as **DECK EQ Cmp** (set 3) | None (not lit) | Later |
+| 16 | DECK Master | DECK A set 3: `eq-gain` / `eq-freq` / `eq-q` cols 1–5; `comp` cols 6–8 top/mid; `sidechain` cols 6–8 bottom | None (not lit) | Yes |
 
 ## Regenerate `.syx`
 
